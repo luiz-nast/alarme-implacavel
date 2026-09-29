@@ -1,0 +1,154 @@
+package com.implacavel.alarme
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberTimePickerState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+
+/** Diálogo pra criar ou editar um alarme. Não grava nada: devolve o alarme pronto em [onSalvar]. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EditorAlarme(
+    inicial: Alarme,
+    novo: Boolean,
+    onSalvar: (Alarme) -> Unit,
+    onExcluir: () -> Unit,
+    onCancelar: () -> Unit,
+) {
+    val relogio = rememberTimePickerState(initialHour = inicial.hora, initialMinute = inicial.minuto, is24Hour = true)
+    var rotulo by remember { mutableStateOf(inicial.rotulo) }
+    var dias by remember { mutableStateOf(inicial.dias) }
+    var desafio by remember { mutableStateOf(inicial.desafio) }
+    var volumeMaximo by remember { mutableStateOf(inicial.volumeMaximo) }
+
+    Dialog(onDismissRequest = onCancelar, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(
+            shape = RoundedCornerShape(28.dp),
+            tonalElevation = 6.dp,
+            modifier = Modifier.fillMaxWidth(0.94f).padding(vertical = 24.dp),
+        ) {
+            Column(
+                Modifier.verticalScroll(rememberScrollState()).padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(if (novo) "Novo alarme" else "Editar alarme", style = MaterialTheme.typography.titleLarge)
+                Spacer(Modifier.height(16.dp))
+                TimePicker(state = relogio)
+                OutlinedTextField(
+                    value = rotulo,
+                    onValueChange = { rotulo = it.take(40) },
+                    label = { Text("Nome (ex.: Remédio)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(16.dp))
+                Text("Repetir", style = MaterialTheme.typography.labelLarge, modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(8.dp))
+                SeletorDias(dias) { dias = it }
+                Text(
+                    resumoDias(dias),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                )
+                Spacer(Modifier.height(8.dp))
+                LinhaSwitch("Desafio pra desligar", "Só desliga resolvendo uma conta", desafio) { desafio = it }
+                LinhaSwitch("Volume máximo", "Ignora o volume atual do celular", volumeMaximo) { volumeMaximo = it }
+                Spacer(Modifier.height(12.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    if (!novo) {
+                        TextButton(
+                            onClick = onExcluir,
+                            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                        ) { Text("Excluir") }
+                    }
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = onCancelar) { Text("Cancelar") }
+                    Button(
+                        onClick = {
+                            val alarme = inicial.copy(
+                                hora = relogio.hour,
+                                minuto = relogio.minute,
+                                rotulo = rotulo.trim(),
+                                dias = dias,
+                                desafio = desafio,
+                                volumeMaximo = volumeMaximo,
+                                ativo = true,
+                            )
+                            onSalvar(alarme)
+                        },
+                    ) { Text("Salvar") }
+                }
+            }
+        }
+    }
+}
+
+/** Sete bolinhas (D S T Q Q S S) que ligam e desligam cada dia da semana. */
+@Composable
+private fun SeletorDias(dias: Set<Int>, onMudar: (Set<Int>) -> Unit) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        ORDEM_DIAS.forEach { dia ->
+            val marcado = dia in dias
+            Box(
+                Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(if (marcado) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
+                    .clickable { onMudar(if (marcado) dias - dia else dias + dia) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    LETRA_DIA.getValue(dia),
+                    fontWeight = FontWeight.Bold,
+                    color = if (marcado) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LinhaSwitch(titulo: String, descricao: String, ligado: Boolean, onMudar: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(titulo, style = MaterialTheme.typography.bodyLarge)
+            Text(descricao, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Switch(checked = ligado, onCheckedChange = onMudar)
+    }
+}

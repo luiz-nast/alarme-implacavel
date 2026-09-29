@@ -1,0 +1,6 @@
+<resources>
+    <color name="fundo_claro">#FFFFF8F7</color>
+    <color name="fundo_escuro">#FF1A1110</color>
+    <color name="fundo_alarme">#FF3B0000</color>
+    <color name="icone_fundo">#FFB71C1C</color>
+</resources>

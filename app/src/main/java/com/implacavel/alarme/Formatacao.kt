@@ -1,0 +1,41 @@
+// Textos de hora e dia mostrados na tela. Funções puras, testadas em FormatacaoTest.
+package com.implacavel.alarme
+
+import java.time.Duration
+import java.time.LocalTime
+import java.time.ZonedDateTime
+import java.util.Locale
+
+/** Ordem dos dias na tela: domingo primeiro, como nos calendários brasileiros. */
+val ORDEM_DIAS = listOf(7, 1, 2, 3, 4, 5, 6)
+
+val NOME_CURTO_DIA = mapOf(1 to "seg", 2 to "ter", 3 to "qua", 4 to "qui", 5 to "sex", 6 to "sáb", 7 to "dom")
+
+val LETRA_DIA = mapOf(1 to "S", 2 to "T", 3 to "Q", 4 to "Q", 5 to "S", 6 to "S", 7 to "D")
+
+fun hhmm(hora: Int, minuto: Int): String = String.format(Locale.ROOT, "%02d:%02d", hora, minuto)
+
+fun hhmm(hora: LocalTime): String = hhmm(hora.hour, hora.minute)
+
+/** "Uma vez", "Todo dia", "Dias úteis", "Fim de semana" ou a lista, como "dom, qua". */
+fun resumoDias(dias: Set<Int>): String = when {
+    dias.isEmpty() -> "Uma vez"
+    dias.size == 7 -> "Todo dia"
+    dias == setOf(1, 2, 3, 4, 5) -> "Dias úteis"
+    dias == setOf(6, 7) -> "Fim de semana"
+    else -> ORDEM_DIAS.filter { it in dias }.joinToString(", ") { NOME_CURTO_DIA.getValue(it) }
+}
+
+/** "em 9 h 12 min", arredondando pra cima até o minuto seguinte. */
+fun tempoAte(agora: ZonedDateTime, quando: ZonedDateTime): String {
+    val minutos = ((Duration.between(agora, quando).seconds + 59) / 60).coerceAtLeast(0)
+    val d = minutos / (24 * 60)
+    val h = minutos / 60 % 24
+    val m = minutos % 60
+    val partes = buildList {
+        if (d > 0) add("$d d")
+        if (h > 0) add("$h h")
+        if (m > 0 || isEmpty()) add("$m min")
+    }
+    return "em " + partes.joinToString(" ")
+}

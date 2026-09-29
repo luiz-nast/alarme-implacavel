@@ -1,0 +1,9 @@
+<resources>
+    <style name="Tema" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/fundo_claro</item>
+    </style>
+
+    <style name="Tema.Alarme" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/fundo_alarme</item>
+    </style>
+</resources>
