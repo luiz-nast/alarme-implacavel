@@ -16,6 +16,11 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
+        // Só processadores ARM (os de qualquer celular Android): o ML Kit traz ~9 MB por tipo,
+        // e x86 só serve pra emulador e Chromebook
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
     }
 
     buildTypes {
@@ -45,5 +50,10 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.core:core-ktx:1.19.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
+    // Câmera frontal (CameraX) e detecção de rosto e olhos abertos no aparelho (ML Kit, modelo embutido)
+    implementation("androidx.camera:camera-camera2:1.6.2")
+    implementation("androidx.camera:camera-lifecycle:1.6.2")
+    implementation("androidx.camera:camera-view:1.6.2")
+    implementation("com.google.mlkit:face-detection:16.1.7")
     testImplementation("junit:junit:4.13.2")
 }

@@ -11,7 +11,7 @@ import java.time.ZonedDateTime
  *
  * @property dias dias em que repete, no padrão DayOfWeek.value (1 = segunda … 7 = domingo).
  *   Vazio = toca uma vez e se desliga sozinho.
- * @property desafio só desliga resolvendo uma conta (veja AlarmeActivity).
+ * @property missao só desliga dizendo STOP e olhando pra câmera de olhos abertos (veja Missao.kt).
  * @property volumeMaximo trava o volume de alarme no máximo enquanto toca (veja Sirene).
  * @property sonecaAte quando a soneca pendente toca (epoch em ms); null se o alarme não foi adiado.
  */
@@ -22,7 +22,7 @@ data class Alarme(
     val rotulo: String = "",
     val dias: Set<Int> = emptySet(),
     val ativo: Boolean = true,
-    val desafio: Boolean = false,
+    val missao: Boolean = true,
     val volumeMaximo: Boolean = true,
     val sonecaAte: Long? = null,
 ) {
@@ -55,7 +55,7 @@ data class Alarme(
         .put("rotulo", rotulo)
         .put("dias", JSONArray(dias.sorted()))
         .put("ativo", ativo)
-        .put("desafio", desafio)
+        .put("missao", missao)
         .put("volumeMaximo", volumeMaximo)
         .apply { if (sonecaAte != null) put("sonecaAte", sonecaAte) }
 
@@ -74,7 +74,7 @@ data class Alarme(
                 rotulo = o.optString("rotulo"),
                 dias = if (dias == null) emptySet() else (0 until dias.length()).map { dias.getInt(it) }.toSet(),
                 ativo = o.optBoolean("ativo", true),
-                desafio = o.optBoolean("desafio", false),
+                missao = o.optBoolean("missao", true),
                 volumeMaximo = o.optBoolean("volumeMaximo", true),
                 sonecaAte = if (o.has("sonecaAte")) o.getLong("sonecaAte") else null,
             )

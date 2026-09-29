@@ -21,10 +21,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.time.LocalTime
 
 /**
- * Serviço em primeiro plano que mantém o alarme tocando até o usuário desligar ou adiar.
- * Liga a [Sirene] e mostra a notificação que abre a [AlarmeActivity] em tela cheia.
+ * Serviço em primeiro plano que mantém o alarme ativo até o usuário desligar ou adiar.
+ * Controla a [Sirene] e mostra a notificação que abre a [AlarmeActivity] em tela cheia.
  *
- * Recebe comandos pela action do Intent: tocar, parar, adiar e reexibir.
+ * Recebe comandos pela action do Intent: tocar, parar, adiar e reexibir, mais silenciar, retomar e
+ * volume, usados pela missão (a música para no "stop", mas o alarme só acaba depois da câmera).
  */
 class AlarmeService : Service() {
 
@@ -33,6 +34,10 @@ class AlarmeService : Service() {
         private const val ACAO_PARAR = "parar"
         private const val ACAO_ADIAR = "adiar"
         private const val ACAO_REEXIBIR = "reexibir"
+        private const val ACAO_SILENCIAR = "silenciar"
+        private const val ACAO_RETOMAR = "retomar"
+        private const val ACAO_VOLUME = "volume"
+        private const val EXTRA_VOLUME = "volume"
 
         /** Sem resposta por 10 minutos, adia sozinho (e volta a tocar na soneca). */
         private const val LIMITE_TOCANDO_MS = 10 * 60_000L
@@ -58,6 +63,21 @@ class AlarmeService : Service() {
             ctx.startService(comando(ctx, ACAO_ADIAR))
         }
 
+        /** Cala a música sem encerrar o alarme. */
+        fun silenciar(ctx: Context) {
+            ctx.startService(comando(ctx, ACAO_SILENCIAR))
+        }
+
+        /** Volta a tocar a música do começo. */
+        fun retomar(ctx: Context) {
+            ctx.startService(comando(ctx, ACAO_RETOMAR))
+        }
+
+        /** Volume da música, de 0 a 1, relativo ao volume de alarme. */
+        fun volume(ctx: Context, fator: Float) {
+            ctx.startService(comando(ctx, ACAO_VOLUME).putExtra(EXTRA_VOLUME, fator))
+        }
+
         private fun comando(ctx: Context, acao: String) = Intent(ctx, AlarmeService::class.java).setAction(acao)
     }
 
@@ -74,11 +94,16 @@ class AlarmeService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Comandos que chegam quando o alarme já acabou só encerram o serviço
+        val alarme = _tocando.value
         when (intent?.action) {
             ACAO_TOCAR -> iniciar(intent.getIntExtra(Agendador.EXTRA_ID, -1))
             ACAO_ADIAR -> adiarEEncerrar()
-            // Desde o Android 14 dá pra arrastar a notificação pro lado; ela volta enquanto o alarme tocar
-            ACAO_REEXIBIR -> _tocando.value?.let { mostrarNotificacao(it) } ?: encerrar()
+            // Desde o Android 14 dá pra arrastar a notificação pro lado; ela volta enquanto o alarme durar
+            ACAO_REEXIBIR -> if (alarme != null) mostrarNotificacao(alarme) else encerrar()
+            ACAO_SILENCIAR -> if (alarme != null) sirene.desligar() else encerrar()
+            ACAO_RETOMAR -> if (alarme != null) sirene.ligar(alarme.volumeMaximo) else encerrar()
+            ACAO_VOLUME -> if (alarme != null) sirene.volume(intent.getFloatExtra(EXTRA_VOLUME, 1f)) else encerrar()
             else -> encerrar()
         }
         return START_NOT_STICKY
@@ -135,13 +160,13 @@ class AlarmeService : Service() {
             Intent(this, AlarmeActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_USER_ACTION),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        // Com o desafio ligado, "Desligar" abre a tela da conta em vez de desligar direto
-        val desligar = if (alarme.desafio) telaCheia else comandoPendente(1, ACAO_PARAR)
+        // Com a missão ligada, "Desligar" abre a tela da missão em vez de desligar direto
+        val desligar = if (alarme.missao) telaCheia else comandoPendente(1, ACAO_PARAR)
         val agora = hhmm(LocalTime.now())
         return NotificationCompat.Builder(this, Notificacoes.CANAL_ALARME)
             .setSmallIcon(R.drawable.ic_alarme)
             .setContentTitle(alarme.rotulo.ifBlank { "Alarme" })
-            .setContentText(if (alarme.desafio) "$agora · resolva a conta pra desligar" else "$agora · tocando")
+            .setContentText(if (alarme.missao) "$agora · diga STOP e olhe pra câmera" else "$agora · tocando")
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)

@@ -16,8 +16,8 @@ import android.os.VibratorManager
 import androidx.core.net.toUri
 
 /**
- * O barulho do alarme: toque em loop, vibração contínua, pausa de outras mídias e, se pedido,
- * volume travado no máximo. Usada só pelo [AlarmeService].
+ * O barulho do alarme: música ou toque em loop, vibração contínua, pausa de outras mídias e, se
+ * pedido, volume travado no máximo. Usada só pelo [AlarmeService].
  *
  * Tudo usa USAGE_ALARM: o volume de alarme não depende do modo silencioso, e o Não Perturbe
  * deixa passar quando "alarmes" estão permitidos (o padrão do Android).
@@ -56,6 +56,11 @@ class Sirene(private val ctx: Context) {
         vibrar()
     }
 
+    /** Volume da música, de 0 a 1, relativo ao volume de alarme (a missão abaixa pra ouvir a voz). */
+    fun volume(fator: Float) {
+        player?.setVolume(fator, fator)
+    }
+
     fun desligar() {
         handler.removeCallbacks(travarVolume)
         player?.let {
@@ -71,9 +76,13 @@ class Sirene(private val ctx: Context) {
         volumeOriginal = null
     }
 
-    /** Toque de alarme do celular; se não der pra ler (ex.: antes do primeiro desbloqueio), os bipes do app. */
+    /**
+     * A música escolhida em [Ajustes]; senão o toque de alarme do celular; se nada puder ser lido
+     * (ex.: antes do primeiro desbloqueio), os bipes do app.
+     */
     private fun tocarSom() {
-        val candidatos = listOf(
+        val candidatos = listOfNotNull(
+            Ajustes.musica.value?.uri?.toUri(),
             RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM),
             RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE),
             "android.resource://${ctx.packageName}/${R.raw.alarme_reserva}".toUri(),

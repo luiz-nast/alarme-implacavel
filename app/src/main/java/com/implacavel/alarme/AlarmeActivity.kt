@@ -6,6 +6,7 @@ import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.core.RepeatMode
@@ -18,7 +19,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -32,11 +32,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -47,6 +47,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -55,11 +56,11 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import java.time.LocalTime
-import kotlin.random.Random
 
 /**
  * Tela do alarme tocando. Aberta pela notificação em tela cheia do [AlarmeService]; aparece por
  * cima da tela de bloqueio, acende a tela e fecha sozinha quando o alarme para.
+ * Com a missão ligada, mostra as etapas de Missao.kt; sem ela, só o botão DESLIGAR.
  */
 class AlarmeActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -71,13 +72,7 @@ class AlarmeActivity : ComponentActivity() {
                 val alarme by AlarmeService.tocando.collectAsStateWithLifecycle()
                 BackHandler { /* o botão voltar não desliga o alarme */ }
                 LaunchedEffect(alarme) { if (alarme == null) finish() }
-                alarme?.let {
-                    TelaAlarme(
-                        alarme = it,
-                        onDesligar = { AlarmeService.parar(this) },
-                        onAdiar = { AlarmeService.adiar(this) },
-                    )
-                }
+                alarme?.let { TelaAlarme(it) }
             }
         }
     }
@@ -99,7 +94,20 @@ class AlarmeActivity : ComponentActivity() {
 }
 
 @Composable
-private fun TelaAlarme(alarme: Alarme, onDesligar: () -> Unit, onAdiar: () -> Unit) {
+private fun TelaAlarme(alarme: Alarme) {
+    val ctx = LocalContext.current
+    var etapa by remember { mutableStateOf(Etapa.FALAR) }
+
+    // Na etapa da câmera a tela fica clara e no brilho máximo, pra iluminar o rosto no escuro
+    val claro = alarme.missao && etapa == Etapa.OLHAR
+    BrilhoMaximo(claro)
+    val corTexto = if (claro) Color(0xFF3B0000) else Color.White
+    val fundo = if (claro) {
+        listOf(Color(0xFFFFFBF2), Color(0xFFFFE0B2))
+    } else {
+        listOf(Color(0xFFB71C1C), Color(0xFF3B0000), Color.Black)
+    }
+
     var agora by remember { mutableStateOf(LocalTime.now()) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -113,12 +121,9 @@ private fun TelaAlarme(alarme: Alarme, onDesligar: () -> Unit, onAdiar: () -> Un
         animationSpec = infiniteRepeatable(tween(550), RepeatMode.Reverse),
         label = "escala",
     )
+
     // Coluna rolável com altura mínima da tela: centraliza quando cabe e rola em celulares pequenos
-    BoxWithConstraints(
-        Modifier
-            .fillMaxSize()
-            .background(Brush.verticalGradient(listOf(Color(0xFFB71C1C), Color(0xFF3B0000), Color.Black))),
-    ) {
+    BoxWithConstraints(Modifier.fillMaxSize().background(Brush.verticalGradient(fundo))) {
         Column(
             Modifier
                 .fillMaxWidth()
@@ -130,97 +135,69 @@ private fun TelaAlarme(alarme: Alarme, onDesligar: () -> Unit, onAdiar: () -> Un
             verticalArrangement = Arrangement.SpaceBetween,
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(16.dp))
                 Icon(
                     painterResource(R.drawable.ic_alarme),
                     contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(72.dp).scale(escala),
+                    tint = corTexto,
+                    modifier = Modifier.size(56.dp).scale(escala),
                 )
-                Text(hhmm(agora), color = Color.White, fontSize = 84.sp, fontWeight = FontWeight.Bold)
-                Text(alarme.rotulo.ifBlank { "Alarme" }, color = Color.White, fontSize = 24.sp, textAlign = TextAlign.Center)
+                Text(hhmm(agora), color = corTexto, fontSize = 72.sp, fontWeight = FontWeight.Bold)
+                Text(alarme.rotulo.ifBlank { "Alarme" }, color = corTexto, fontSize = 22.sp, textAlign = TextAlign.Center)
             }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Spacer(Modifier.height(24.dp))
-                if (alarme.desafio) {
-                    Desafio(onAcertou = onDesligar)
-                } else {
-                    Button(
-                        onClick = onDesligar,
-                        modifier = Modifier.fillMaxWidth().height(76.dp),
-                        shape = RoundedCornerShape(24.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color(0xFFB71C1C)),
-                    ) { Text("DESLIGAR", fontSize = 26.sp, fontWeight = FontWeight.Black) }
+                Spacer(Modifier.height(16.dp))
+                when {
+                    !alarme.missao -> BotaoGrande("DESLIGAR", { AlarmeService.parar(ctx) })
+                    etapa == Etapa.FALAR -> EtapaFalar(
+                        onStop = {
+                            AlarmeService.silenciar(ctx)
+                            etapa = Etapa.OLHAR
+                        },
+                    )
+                    else -> EtapaOlhar(
+                        onConcluiu = { AlarmeService.parar(ctx) },
+                        onDesistiu = {
+                            AlarmeService.retomar(ctx)
+                            etapa = Etapa.FALAR
+                        },
+                    )
                 }
                 Spacer(Modifier.height(16.dp))
                 OutlinedButton(
-                    onClick = onAdiar,
+                    onClick = { AlarmeService.adiar(ctx) },
                     modifier = Modifier.fillMaxWidth().height(56.dp),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.6f)),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                    border = BorderStroke(1.dp, corTexto.copy(alpha = 0.6f)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = corTexto),
                 ) { Text("Adiar ${Agendador.SONECA_MINUTOS} min", fontSize = 18.sp) }
             }
         }
     }
 }
 
-/** Conta de somar que precisa ser resolvida pra desligar: acorda o cérebro de verdade. */
+/** Botão grande das telas do alarme: branco no fundo vermelho, vermelho no fundo claro. */
 @Composable
-private fun Desafio(onAcertou: () -> Unit) {
-    val a = remember { Random.nextInt(12, 60) }
-    val b = remember { Random.nextInt(12, 60) }
-    var resposta by remember { mutableStateOf("") }
-    var errou by remember { mutableStateOf(false) }
-    val corErro = Color(0xFFFFCDD2)
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("Pra desligar, resolva:", color = Color.White, fontSize = 18.sp)
-        Text(
-            "$a + $b = ${resposta.ifEmpty { "?" }}",
-            color = if (errou) corErro else Color.White,
-            fontSize = 40.sp,
-            fontWeight = FontWeight.Bold,
-        )
-        Text(if (errou) "Errou! Tenta de novo." else "", color = corErro, fontSize = 16.sp)
-        Spacer(Modifier.height(12.dp))
-        Teclado { tecla ->
-            when (tecla) {
-                "⌫" -> {
-                    resposta = resposta.dropLast(1)
-                }
-                "OK" -> {
-                    if (resposta.toIntOrNull() == a + b) {
-                        onAcertou()
-                    } else {
-                        errou = true
-                        resposta = ""
-                    }
-                }
-                else -> {
-                    if (resposta.length < 3) {
-                        resposta += tecla
-                        errou = false
-                    }
-                }
-            }
-        }
+fun BotaoGrande(texto: String, onClick: () -> Unit, fundoClaro: Boolean = false) {
+    val cores = if (fundoClaro) {
+        ButtonDefaults.buttonColors(containerColor = Color(0xFFB71C1C), contentColor = Color.White)
+    } else {
+        ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color(0xFFB71C1C))
     }
+    Button(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().height(76.dp),
+        shape = RoundedCornerShape(24.dp),
+        colors = cores,
+    ) { Text(texto, fontSize = 24.sp, fontWeight = FontWeight.Black) }
 }
 
-/** Teclado numérico próprio: funciona por cima da tela de bloqueio, sem depender do teclado do sistema. */
+/** Força o brilho máximo da tela enquanto [ligado]; ao sair, devolve o brilho do sistema. */
 @Composable
-private fun Teclado(onTecla: (String) -> Unit) {
-    val teclas = listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "⌫", "0", "OK")
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        teclas.chunked(3).forEach { linha ->
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                linha.forEach { tecla ->
-                    FilledTonalButton(
-                        onClick = { onTecla(tecla) },
-                        modifier = Modifier.size(width = 84.dp, height = 60.dp),
-                        shape = RoundedCornerShape(16.dp),
-                    ) { Text(tecla, fontSize = 22.sp) }
-                }
-            }
-        }
+private fun BrilhoMaximo(ligado: Boolean) {
+    val janela = LocalActivity.current?.window ?: return
+    DisposableEffect(ligado) {
+        val original = janela.attributes.screenBrightness
+        if (ligado) janela.attributes = janela.attributes.apply { screenBrightness = 1f }
+        onDispose { janela.attributes = janela.attributes.apply { screenBrightness = original } }
     }
 }

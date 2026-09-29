@@ -1,4 +1,4 @@
-// Blocos da tela principal: cabeçalho, cartão de permissões e cartão de cada alarme.
+// Blocos da tela principal: cabeçalho, cartão de permissões, cartão da música e cartão de cada alarme.
 package com.implacavel.alarme
 
 import android.os.Build
@@ -20,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.time.ZonedDateTime
@@ -92,6 +93,26 @@ fun CartaoPoderes(poderes: Map<Poder, Boolean>, onLiberar: (Poder) -> Unit) {
     }
 }
 
+/** Música que toca em todos os alarmes; sem escolha, vale o toque de alarme do celular. */
+@Composable
+fun CartaoMusica(nome: String?, onEscolher: () -> Unit, onTirar: () -> Unit) {
+    Card(Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Música do alarme", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(
+                    nome ?: "Toque de alarme do celular",
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (nome != null) TextButton(onClick = onTirar) { Text("Tirar") }
+            Button(onClick = onEscolher) { Text("Escolher") }
+        }
+    }
+}
+
 @Composable
 fun CartaoAlarme(
     alarme: Alarme,
@@ -110,7 +131,7 @@ fun CartaoAlarme(
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 val extras = listOfNotNull(
-                    "desafio pra desligar".takeIf { alarme.desafio },
+                    "missão: STOP + câmera".takeIf { alarme.missao },
                     "volume máximo".takeIf { alarme.volumeMaximo },
                 )
                 if (extras.isNotEmpty()) {
