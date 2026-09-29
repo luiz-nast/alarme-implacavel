@@ -52,7 +52,7 @@ fun EditorAlarme(
     val relogio = rememberTimePickerState(initialHour = inicial.hora, initialMinute = inicial.minuto, is24Hour = true)
     var rotulo by remember { mutableStateOf(inicial.rotulo) }
     var dias by remember { mutableStateOf(inicial.dias) }
-    var desafio by remember { mutableStateOf(inicial.desafio) }
+    var missao by remember { mutableStateOf(inicial.missao) }
     var volumeMaximo by remember { mutableStateOf(inicial.volumeMaximo) }
 
     Dialog(onDismissRequest = onCancelar, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -86,7 +86,7 @@ fun EditorAlarme(
                     modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                 )
                 Spacer(Modifier.height(8.dp))
-                LinhaSwitch("Desafio pra desligar", "Só desliga resolvendo uma conta", desafio) { desafio = it }
+                LinhaSwitch("Missão pra desligar", "Dizer STOP e olhar pra câmera de olhos abertos", missao) { missao = it }
                 LinhaSwitch("Volume máximo", "Ignora o volume atual do celular", volumeMaximo) { volumeMaximo = it }
                 Spacer(Modifier.height(12.dp))
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -105,7 +105,7 @@ fun EditorAlarme(
                                 minuto = relogio.minute,
                                 rotulo = rotulo.trim(),
                                 dias = dias,
-                                desafio = desafio,
+                                missao = missao,
                                 volumeMaximo = volumeMaximo,
                                 ativo = true,
                             )

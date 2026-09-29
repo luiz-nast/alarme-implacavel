@@ -1,10 +1,7 @@
 package com.implacavel.alarme
 
-import android.Manifest
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Toast
@@ -37,14 +34,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import java.time.ZonedDateTime
 
-/** Tela principal: permissões, botão de teste e lista de alarmes. */
+/** Tela principal: permissões, música, botão de teste e lista de alarmes. */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -76,24 +72,30 @@ private fun TelaPrincipal() {
         onPauseOrDispose { }
     }
 
-    // Notificação (Android 13+) usa o pedido do sistema. Se o usuário já negou, o sistema não pergunta
-    // de novo; aí, se o pedido veio do botão "Liberar", abre as Configurações.
-    var pedidoPeloBotao by remember { mutableStateOf(false) }
-    val pedirNotificacao = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
-        if (!ok && pedidoPeloBotao) abrirConfiguracao(ctx, Poder.NOTIFICACOES)
-        pedidoPeloBotao = false
+    // Permissões com diálogo do sistema (notificação, microfone, câmera). Se o usuário já negou, o
+    // sistema não pergunta de novo; aí, se o pedido veio de um botão "Liberar", abre as Configurações.
+    var pedidoDoBotao by remember { mutableStateOf<Poder?>(null) }
+    val pedirPermissao = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        pedidoDoBotao?.let { if (!ok) abrirConfiguracao(ctx, it) }
+        pedidoDoBotao = null
         poderes = lerPoderes(ctx)
     }
     LaunchedEffect(Unit) {
-        if (precisaPedirNotificacao(ctx)) pedirNotificacao.launch(Manifest.permission.POST_NOTIFICATIONS)
+        Poder.NOTIFICACOES.permissao?.takeUnless { Poderes.concedida(ctx, it) }?.let { pedirPermissao.launch(it) }
     }
     val liberar: (Poder) -> Unit = { poder ->
-        if (poder == Poder.NOTIFICACOES && precisaPedirNotificacao(ctx)) {
-            pedidoPeloBotao = true
-            pedirNotificacao.launch(Manifest.permission.POST_NOTIFICATIONS)
+        val permissao = poder.permissao
+        if (permissao != null && !Poderes.concedida(ctx, permissao)) {
+            pedidoDoBotao = poder
+            pedirPermissao.launch(permissao)
         } else {
             abrirConfiguracao(ctx, poder)
         }
+    }
+
+    val musica by Ajustes.musica.collectAsStateWithLifecycle()
+    val escolherMusica = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) Ajustes.escolherMusica(ctx, uri)
     }
 
     Scaffold(
@@ -125,6 +127,13 @@ private fun TelaPrincipal() {
                 }
             }
             item { CartaoPoderes(poderes, liberar) }
+            item {
+                CartaoMusica(
+                    nome = musica?.nome,
+                    onEscolher = { escolherMusica.launch(arrayOf("audio/*")) },
+                    onTirar = { Ajustes.tirarMusica(ctx) },
+                )
+            }
             item {
                 OutlinedButton(
                     onClick = {
@@ -177,9 +186,6 @@ private fun TelaPrincipal() {
 }
 
 private fun lerPoderes(ctx: Context) = Poder.entries.associateWith { Poderes.liberado(ctx, it) }
-
-private fun precisaPedirNotificacao(ctx: Context) = Build.VERSION.SDK_INT >= 33 &&
-    ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
 
 private fun abrirConfiguracao(ctx: Context, poder: Poder) {
     runCatching { ctx.startActivity(Poderes.telaParaLiberar(ctx, poder)) }.onFailure {
