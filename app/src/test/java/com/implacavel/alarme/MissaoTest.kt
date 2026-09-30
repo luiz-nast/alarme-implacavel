@@ -41,24 +41,15 @@ class MissaoTest {
     }
 
     @Test
-    fun piscadaOuFalhaCurtaAindaContaComoOlhando() {
-        assertTrue(olhandoComTolerancia(agoraMs = 10_000, ultimaOlhadaMs = 9_300))
-        assertFalse(olhandoComTolerancia(agoraMs = 10_000, ultimaOlhadaMs = 8_000))
-        assertFalse(olhandoComTolerancia(agoraMs = 10_000, ultimaOlhadaMs = 0)) // nunca olhou
-    }
-
-    @Test
-    fun anelSobeOlhandoParaSemRostoEDesceDeLado() {
+    fun anelSoSobeOlhandoENuncaDesce() {
         var progresso = 0f
         repeat(50) { progresso = avancarOlhar(progresso, Leitura.OLHANDO, passoMs = 100) }
         assertEquals(0.5f, progresso, 0.001f)
-        // A câmera perdeu o rosto: o anel espera, não cai
-        repeat(30) { progresso = avancarOlhar(progresso, Leitura.SEM_ROSTO, passoMs = 100) }
-        assertEquals(0.5f, progresso, 0.001f)
-        // De lado ou de olhos fechados: desce na mesma velocidade em que sobe
-        repeat(10) { progresso = avancarOlhar(progresso, Leitura.DE_LADO, passoMs = 100) }
-        assertEquals(0.4f, progresso, 0.001f)
-        assertEquals(0f, avancarOlhar(0f, Leitura.OLHOS_FECHADOS, passoMs = 100), 0f)
+        // Sem olhos abertos no quadro atual, o anel para na hora e fica onde está
+        for (leitura in listOf(Leitura.SEM_ROSTO, Leitura.DE_LADO, Leitura.OLHOS_FECHADOS, Leitura.SEM_CAMERA)) {
+            repeat(30) { progresso = avancarOlhar(progresso, leitura, passoMs = 100) }
+            assertEquals(leitura.name, 0.5f, progresso, 0.001f)
+        }
         assertEquals(1f, avancarOlhar(0.999f, Leitura.OLHANDO, passoMs = 100), 0f)
     }
 

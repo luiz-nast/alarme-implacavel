@@ -14,17 +14,8 @@ const val META_OLHAR_MS = 10_000L
  */
 const val DESISTENCIA_MS = 20_000L
 
-/**
- * Piscar ou uma falha da câmera não conta como "parou de olhar": só depois desse tempo sem nenhum
- * quadro de olhos abertos. Sem isso, a leitura oscila a cada quadro e o anel não enche.
- */
-const val TOLERANCIA_MS = 1_500L
-
 /** O que a câmera está vendo agora. */
 enum class Leitura { SEM_CAMERA, SEM_ROSTO, DE_LADO, OLHOS_FECHADOS, OLHANDO }
-
-/** Conta como olhando se o último quadro de olhos abertos foi há menos de [TOLERANCIA_MS]. */
-fun olhandoComTolerancia(agoraMs: Long, ultimaOlhadaMs: Long): Boolean = agoraMs - ultimaOlhadaMs < TOLERANCIA_MS
 
 /** Aceita "stop" e jeitos de falar ou transcrever com sotaque ("estop", "istópi", "stopi"). */
 fun disseStop(texto: String): Boolean {
@@ -40,18 +31,10 @@ fun classificarRosto(giroLateral: Float, giroVertical: Float, olhoEsquerdo: Floa
 }
 
 /**
- * Progresso de 0 a 1 do anel da câmera depois de [passoMs] com a [leitura]: sobe olhando; fica parado
- * sem rosto na imagem (a câmera perdeu o rosto, o que é falha dela e não truque); desce na mesma
- * velocidade de lado ou de olhos fechados.
+ * Progresso de 0 a 1 do anel da câmera depois de [passoMs]: só sobe com a [leitura] do quadro atual
+ * em OLHANDO. Com qualquer outra (olhos fechados, de lado, sem rosto), para na hora e nunca desce.
  */
-fun avancarOlhar(progresso: Float, leitura: Leitura, passoMs: Long): Float {
-    val passo = passoMs.toFloat() / META_OLHAR_MS
-    val mudanca = when (leitura) {
-        Leitura.OLHANDO -> passo
-        Leitura.SEM_ROSTO, Leitura.SEM_CAMERA -> 0f
-        Leitura.DE_LADO, Leitura.OLHOS_FECHADOS -> -passo
-    }
-    return (progresso + mudanca).coerceIn(0f, 1f)
-}
+fun avancarOlhar(progresso: Float, leitura: Leitura, passoMs: Long): Float =
+    if (leitura == Leitura.OLHANDO) (progresso + passoMs.toFloat() / META_OLHAR_MS).coerceAtMost(1f) else progresso
 
 fun segundosRestantes(progresso: Float): Int = ceil((1 - progresso) * META_OLHAR_MS / 1000.0).toInt()

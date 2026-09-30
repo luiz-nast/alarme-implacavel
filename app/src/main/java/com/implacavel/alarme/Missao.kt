@@ -26,7 +26,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -160,23 +159,23 @@ fun EtapaOlhar(onOlhando: () -> Unit, onConcluiu: () -> Unit) {
     val avisarOlhando by rememberUpdatedState(onOlhando)
     val concluir by rememberUpdatedState(onConcluiu)
     var progresso by remember { mutableFloatStateOf(0f) }
-    var ultimaOlhada by remember { mutableLongStateOf(0L) } // último quadro com olhos abertos
-    var olhando by remember { mutableStateOf(false) } // já com a tolerância a piscadas e falhas da câmera
     LaunchedEffect(Unit) {
         var ultimoAviso = 0L
+        var olhavaAntes = false
         while (true) {
             delay(PASSO_MS)
-            val agora = System.currentTimeMillis()
-            val agoraOlhando = olhandoComTolerancia(agora, ultimaOlhada)
-            if (agoraOlhando != olhando) {
-                olhando = agoraOlhando
+            // Vale o quadro atual: tirou o rosto ou fechou os olhos, o anel para na hora
+            val olhando = leitura == Leitura.OLHANDO
+            if (olhando != olhavaAntes) {
+                olhavaAntes = olhando
                 Log.i(TAG, "Câmera: ${if (olhando) "olhando" else "parou de olhar ($leitura)"}, anel ${(progresso * 100).toInt()}%")
             }
+            val agora = System.currentTimeMillis()
             if (olhando && agora - ultimoAviso >= AVISO_OLHANDO_MS) {
                 avisarOlhando()
                 ultimoAviso = agora
             }
-            progresso = avancarOlhar(progresso, if (olhando) Leitura.OLHANDO else leitura, PASSO_MS)
+            progresso = avancarOlhar(progresso, leitura, PASSO_MS)
             if (progresso >= 1f) {
                 Log.i(TAG, "Missão: anel completo, alarme desligado")
                 concluir()
@@ -185,15 +184,11 @@ fun EtapaOlhar(onOlhando: () -> Unit, onConcluiu: () -> Unit) {
         }
     }
 
-    // Enquanto conta como olhando, uma piscada não pinta a tela de vermelho
-    val (corAlvo, mensagem) = retorno(if (olhando) Leitura.OLHANDO else leitura)
+    val (corAlvo, mensagem) = retorno(leitura)
     val cor by animateColorAsState(corAlvo, label = "cor da leitura")
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(contentAlignment = Alignment.Center) {
-            CameraOlhos(Modifier.size(220.dp).clip(CircleShape)) { nova ->
-                leitura = nova
-                if (nova == Leitura.OLHANDO) ultimaOlhada = System.currentTimeMillis()
-            }
+            CameraOlhos(Modifier.size(220.dp).clip(CircleShape)) { leitura = it }
             AnelProgresso(progresso, cor, Modifier.size(252.dp))
         }
         Spacer(Modifier.height(16.dp))
