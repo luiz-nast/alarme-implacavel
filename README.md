@@ -18,7 +18,7 @@ App Android de despertador feito pra ser impossível de ignorar. Ele toma a tela
 | Missão, etapa 2: olhar pra câmera | Câmera frontal num círculo com anel de progresso: enche olhando de olhos abertos, esvazia 2× mais rápido sem olhar (piscadas de até 0,6 s não contam) | `CameraOlhos.kt`, `Missao.kt` |
 | Feedback visual da câmera | Anel e texto verde (olhando), âmbar (de lado) ou vermelho (olhos fechados, sem rosto); tela clara no brilho máximo pra iluminar o rosto | `Missao.kt`, `AlarmeActivity.kt` |
 | Não dá pra enrolar | 20 s sem olhar pra câmera: a música volta e a missão recomeça (a vigia fica no serviço) | `AlarmeService.kt` |
-| Fechar a tela não adianta | Home, arrastar o app ou apagar a tela com o alarme ativo: em 2 s a música volta e uma nova notificação em tela cheia reabre o alarme | `AlarmeActivity.kt`, `AlarmeService.kt` |
+| Fechar a tela não adianta | Home, arrastar o app ou apagar a tela com o alarme ativo: em 1 s a música volta e uma nova notificação em tela cheia reabre o alarme (no Galaxy S24 FE, 2,5 a 4,8 s no total) | `AlarmeActivity.kt`, `AlarmeService.kt` |
 | Desligar o celular não adianta | O alarme em andamento fica gravado até ser cumprido; quando o processo volta (celular ligado de novo, app reaberto), ele toca de novo em 2 s | `Ajustes.kt`, `App.kt` |
 | Sem botão de adiar | Só desliga cumprindo a missão | `AlarmeActivity.kt` |
 | Volume travado no máximo (opcional) | A cada 1 s, restaura o volume de alarme se alguém abaixar | `Sirene.kt` |
@@ -94,7 +94,7 @@ Ciclo de vida de um disparo:
    - **Vigia:** 20 s sem sinal (a pessoa não olhou ou fechou a tela) religam a música e a notificação; `silenciado` volta a `false` e a tela, se estiver aberta, volta pro FALAR.
 
    Com `missao = false`, aparece só o botão DESLIGAR.
-6. Enquanto o alarme dura, a `AlarmeActivity` avisa o serviço em `onStart`/`onStop` (`AlarmeService.tela`). Se a tela sumir por 2 s, o serviço religa a música e posta uma segunda notificação em tela cheia (`Notificacoes.ID_CHAMADA`), que reabre a tela, inclusive com o celular bloqueado.
+6. Enquanto o alarme dura, a `AlarmeActivity` avisa o serviço em `onStart`/`onStop` (`AlarmeService.tela`). Se a tela sumir por 1 s, o serviço religa a música e posta uma segunda notificação em tela cheia (`Notificacoes.ID_CHAMADA`), que reabre a tela, inclusive com o celular bloqueado.
 7. Missão cumprida (`parar`) ou pausa automática encerram o serviço e apagam `Ajustes.alarmeEmAndamento`; a limpeza acontece em `onDestroy`. Se o processo morrer antes disso, `App.onCreate` encontra o alarme em andamento e o religa com `Agendador.retomar`.
 
 ## Mapa dos arquivos
@@ -143,7 +143,7 @@ Outros arquivos:
 - **Olhar = rosto de frente + dois olhos abertos.** Giro de até 20°, probabilidade de olho aberto do ML Kit acima de 60%. É detecção de rosto, **não** reconhecimento de quem é: qualquer rosto serve.
 - **Piscar não derruba o anel.** A leitura da câmera oscila quadro a quadro entre "olhando" e "olhos fechados". Por isso só conta como "parou de olhar" depois de `TOLERANCIA_PISCADA_MS` (0,6 s) sem nenhum quadro de olhos abertos.
 - **Girar o celular não reinicia a missão.** A `AlarmeActivity` declara `configChanges`, então câmera e microfone seguem rodando. Antes, girar recriava a tela e voltava pro "diga STOP" com a música já calada.
-- **Sem adiar, e fugir da tela não funciona.** Não há botão de adiar. Fechar a tela do alarme de qualquer jeito reabre ela em ~2 s: o serviço, vivo, posta uma notificação nova em tela cheia (`ID_CHAMADA`), que o Android abre por cima da tela de bloqueio. Desligar o celular só adia até ele ligar: `Ajustes.alarmeEmAndamento` sobrevive, e o `App` religa o alarme na próxima vez que o processo sobe (o `BootReceiver` garante isso no boot).
+- **Sem adiar, e fugir da tela não funciona.** Não há botão de adiar. Fechar a tela do alarme de qualquer jeito reabre ela em poucos segundos: o serviço, vivo, posta uma notificação nova em tela cheia (`ID_CHAMADA`), que o Android abre por cima da tela de bloqueio. Desligar o celular só adia até ele ligar: `Ajustes.alarmeEmAndamento` sobrevive, e o `App` religa o alarme na próxima vez que o processo sobe (o `BootReceiver` garante isso no boot).
 - **A vigia da missão fica no serviço, não na tela.** Num teste, dizer "stop" e fechar a tela do alarme deixava a música calada até a soneca automática de 10 min: a regra dos 20 s morria junto com a tela. Agora a etapa vem de `AlarmeService.silenciado`, a tela só manda sinais de "olhando", e é o serviço (que continua vivo) quem religa a música.
 - **ML Kit com modelo embutido**, e não o baixado pelo Google Play Services: funciona offline e antes do primeiro desbloqueio. Custa ~8 MB por tipo de processador, por isso o APK só inclui ARM (`abiFilters`); o lint avisa da falta de x86 pra Chromebook, e isso é de propósito.
 - **ML Kit precisa de regra no R8.** O ML Kit cria partes de si mesmo por reflexão. No modo completo do R8 (padrão do AGP 9), os construtores delas sumiam e `FaceDetection.getClient` quebrava com `NullPointerException` ao abrir a câmera. `app/proguard-rules.pro` mantém `com.google.mlkit.**` e `com.google.android.gms.internal.mlkit_**` inteiros.

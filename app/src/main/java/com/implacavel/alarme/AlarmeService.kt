@@ -51,8 +51,11 @@ class AlarmeService : Service() {
         /** Sem a missão cumprida em 10 minutos, o alarme pausa [Agendador.SONECA_MINUTOS] e volta. */
         private const val LIMITE_TOCANDO_MS = 10 * 60_000L
 
-        /** Tela do alarme fechada no meio: tempo até a música voltar e a tela reabrir. */
-        private const val TELA_FECHADA_MS = 2_000L
+        /**
+         * Tela do alarme fechada no meio: tempo até a música voltar e a tela reabrir. O Android ainda leva
+         * de 0,5 a 3 s pra mostrar a tela cheia; com 1 s aqui, o total fica abaixo de 5 s.
+         */
+        private const val TELA_FECHADA_MS = 1_000L
 
         private val _tocando = MutableStateFlow<Alarme?>(null)
 
@@ -116,7 +119,7 @@ class AlarmeService : Service() {
     /** A tela do alarme sumiu e não voltou: música de volta e tela reaberta por uma nova notificação em tela cheia. */
     private val chamarDeVolta = Runnable {
         val alarme = _tocando.value ?: return@Runnable
-        Log.i(TAG, "Tela do alarme fechada há ${TELA_FECHADA_MS / 1000} s: música volta e a tela reabre")
+        Log.i(TAG, "Tela do alarme fechada há $TELA_FECHADA_MS ms: música volta e a tela reabre")
         religarMusica()
         notificacoes().notify(Notificacoes.ID_CHAMADA, criarNotificacao(alarme))
     }
