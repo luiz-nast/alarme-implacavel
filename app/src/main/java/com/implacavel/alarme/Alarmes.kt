@@ -11,10 +11,7 @@ import org.json.JSONArray
 /**
  * Lista de alarmes salvos, fonte única da verdade: a tela observa [lista]; receivers e serviço
  * leem e gravam por aqui. Tudo roda na thread principal, então não há concorrência.
- *
- * Grava JSON no armazenamento "protegido pelo dispositivo", que pode ser lido logo depois de o
- * celular reiniciar, antes do primeiro desbloqueio. É isso que deixa o alarme tocar mesmo se o
- * celular reiniciar de madrugada.
+ * Grava JSON em [prefsProtegidas], que pode ser lido antes do primeiro desbloqueio.
  */
 object Alarmes {
     private lateinit var prefs: SharedPreferences
@@ -23,7 +20,7 @@ object Alarmes {
 
     /** Chamado uma vez em [App.onCreate], antes de qualquer outro uso. */
     fun carregar(ctx: Context) {
-        prefs = ctx.createDeviceProtectedStorageContext().getSharedPreferences("alarmes", Context.MODE_PRIVATE)
+        prefs = ctx.prefsProtegidas("alarmes")
         val json = JSONArray(prefs.getString("lista", null) ?: "[]")
         _lista.value = (0 until json.length()).map { Alarme.deJson(json.getJSONObject(it)) }
     }

@@ -1,6 +1,5 @@
 package com.implacavel.alarme
 
-import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
@@ -28,7 +27,7 @@ class OuvinteStop(
     private var falhasSeguidas = 0
 
     fun comecar() {
-        val microfone = Poderes.concedida(ctx, Manifest.permission.RECORD_AUDIO)
+        val microfone = Poder.MICROFONE.liberado(ctx)
         val reconhecimento = SpeechRecognizer.isRecognitionAvailable(ctx)
         if (!microfone || !reconhecimento) {
             Log.w(TAG, "Voz: indisponível (microfone=$microfone, reconhecimento=$reconhecimento)")

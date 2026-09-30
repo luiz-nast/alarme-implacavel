@@ -31,9 +31,11 @@ import java.time.LocalTime
  * - depois do "stop", a música só fica calada enquanto a câmera avisa ("olhando") que a pessoa
  *   olha; sem aviso por [DESISTENCIA_MS], a vigia religa a música;
  * - o alarme fica gravado em [Ajustes.alarmeEmAndamento] até ser cumprido: se o celular desligar
- *   ou o app morrer no meio, o [App] religa o alarme quando o processo voltar.
+ *   ou o app morrer no meio, o [App] religa o alarme quando o processo voltar;
+ * - sem a missão cumprida em [LIMITE_TOCANDO_MS] (ex.: ninguém em casa), pausa [PAUSA_MINUTOS] e volta.
  *
- * Comandos pela action do Intent: tocar, parar, reexibir, tela, silenciar, olhando e volume.
+ * Comandos pela action do Intent, cada um com uma função no companion: tocar, parar, tela,
+ * silenciar, olhando e volume. O comando reexibir vem da notificação arrastada pro lado.
  */
 class AlarmeService : Service() {
 
@@ -48,8 +50,8 @@ class AlarmeService : Service() {
         private const val EXTRA_VOLUME = "volume"
         private const val EXTRA_ABERTA = "aberta"
 
-        /** Sem a missão cumprida em 10 minutos, o alarme pausa [Agendador.SONECA_MINUTOS] e volta. */
         private const val LIMITE_TOCANDO_MS = 10 * 60_000L
+        private const val PAUSA_MINUTOS = 5L
 
         /**
          * Tela do alarme fechada no meio: tempo até a música voltar e a tela reabrir. O Android ainda leva
@@ -72,13 +74,11 @@ class AlarmeService : Service() {
             // não deixa iniciar serviço em segundo plano e não há o que fazer
             runCatching {
                 ContextCompat.startForegroundService(ctx, comando(ctx, ACAO_TOCAR).putExtra(Agendador.EXTRA_ID, id))
-            }
+            }.onFailure { Log.e(TAG, "Serviço: o Android não deixou começar a tocar", it) }
         }
 
         /** Missão cumprida (ou DESLIGAR, em alarme sem missão). */
-        fun parar(ctx: Context) {
-            ctx.startService(comando(ctx, ACAO_PARAR))
-        }
+        fun parar(ctx: Context) { ctx.startService(comando(ctx, ACAO_PARAR)) }
 
         /** A tela do alarme apareceu ou sumiu (a AlarmeActivity avisa em onStart e onStop). */
         fun tela(ctx: Context, aberta: Boolean) {
@@ -86,19 +86,13 @@ class AlarmeService : Service() {
         }
 
         /** A pessoa disse "stop": cala a música sem encerrar o alarme e liga a vigia. */
-        fun silenciar(ctx: Context) {
-            ctx.startService(comando(ctx, ACAO_SILENCIAR))
-        }
+        fun silenciar(ctx: Context) { ctx.startService(comando(ctx, ACAO_SILENCIAR)) }
 
         /** Sinal da etapa da câmera de que a pessoa está olhando: a vigia espera mais [DESISTENCIA_MS]. */
-        fun olhando(ctx: Context) {
-            ctx.startService(comando(ctx, ACAO_OLHANDO))
-        }
+        fun olhando(ctx: Context) { ctx.startService(comando(ctx, ACAO_OLHANDO)) }
 
         /** Volume da música, de 0 a 1, relativo ao volume de alarme. */
-        fun volume(ctx: Context, fator: Float) {
-            ctx.startService(comando(ctx, ACAO_VOLUME).putExtra(EXTRA_VOLUME, fator))
-        }
+        fun volume(ctx: Context, fator: Float) { ctx.startService(comando(ctx, ACAO_VOLUME).putExtra(EXTRA_VOLUME, fator)) }
 
         private fun comando(ctx: Context, acao: String) = Intent(ctx, AlarmeService::class.java).setAction(acao)
     }
@@ -132,29 +126,27 @@ class AlarmeService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Comandos que chegam quando o alarme já acabou só encerram o serviço
-        val alarme = _tocando.value
         val acao = intent?.action
         if (acao == ACAO_TOCAR || acao == ACAO_PARAR || acao == ACAO_SILENCIAR) Log.i(TAG, "Serviço: comando $acao")
-        when (acao) {
-            ACAO_TOCAR -> iniciar(intent.getIntExtra(Agendador.EXTRA_ID, -1))
+        val alarme = _tocando.value
+        when {
+            acao == ACAO_TOCAR -> iniciar(intent.getIntExtra(Agendador.EXTRA_ID, -1))
+            // Comando que chega quando o alarme já acabou só encerra o serviço
+            acao == ACAO_PARAR || alarme == null -> encerrar()
             // Desde o Android 14 dá pra arrastar a notificação pro lado; ela volta enquanto o alarme durar
-            ACAO_REEXIBIR -> if (alarme != null) mostrarNotificacao(alarme) else encerrar()
-            ACAO_TELA -> if (alarme != null) telaMudou(intent.getBooleanExtra(EXTRA_ABERTA, true)) else encerrar()
-            ACAO_SILENCIAR -> if (alarme != null) silenciarMusica() else encerrar()
-            ACAO_OLHANDO -> if (alarme == null) encerrar() else if (_silenciado.value) adiarVigia()
+            acao == ACAO_REEXIBIR -> mostrarNotificacao(alarme)
+            acao == ACAO_TELA -> telaMudou(intent.getBooleanExtra(EXTRA_ABERTA, true))
+            acao == ACAO_SILENCIAR -> silenciarMusica()
+            acao == ACAO_OLHANDO -> if (_silenciado.value) adiarVigia()
             // Com a tela fechada não há janela de escuta: a música fica no volume cheio
-            ACAO_VOLUME -> if (alarme == null) encerrar() else if (telaAberta) sirene.volume(intent.getFloatExtra(EXTRA_VOLUME, 1f))
-            else -> encerrar()
+            acao == ACAO_VOLUME -> if (telaAberta) sirene.volume(intent.getFloatExtra(EXTRA_VOLUME, 1f))
         }
         return START_NOT_STICKY
     }
 
     override fun onDestroy() {
         Log.i(TAG, "Serviço: alarme encerrado")
-        handler.removeCallbacks(esgotou)
-        handler.removeCallbacks(vigia)
-        handler.removeCallbacks(chamarDeVolta)
+        handler.removeCallbacksAndMessages(null)
         notificacoes().cancel(Notificacoes.ID_CHAMADA)
         sirene.desligar()
         _silenciado.value = false
@@ -176,9 +168,9 @@ class AlarmeService : Service() {
             mostrarNotificacao(alarme)
             return
         }
-        Log.i(TAG, "Serviço: tocando \"${alarme.rotulo}\" (missão=${alarme.missao}, volume máximo=${alarme.volumeMaximo})")
-        handler.removeCallbacks(vigia) // se outro alarme estava na etapa da câmera, este recomeça do zero
-        handler.removeCallbacks(chamarDeVolta)
+        Log.i(TAG, "Serviço: tocando \"${alarme.nome}\" (missão=${alarme.missao}, volume máximo=${alarme.volumeMaximo})")
+        // Se outro alarme estava tocando, este recomeça do zero: sem vigia, sem tela fechada, com limite novo
+        handler.removeCallbacksAndMessages(null)
         telaAberta = true
         _silenciado.value = false
         _tocando.value = alarme
@@ -186,7 +178,6 @@ class AlarmeService : Service() {
         mostrarNotificacao(alarme)
         sirene.ligar(alarme.volumeMaximo)
         segurarProcessador()
-        handler.removeCallbacks(esgotou)
         handler.postDelayed(esgotou, LIMITE_TOCANDO_MS)
     }
 
@@ -226,12 +217,12 @@ class AlarmeService : Service() {
         }
     }
 
-    /** 10 minutos sem a missão cumprida: pausa e volta depois de [Agendador.SONECA_MINUTOS]. */
+    /** [LIMITE_TOCANDO_MS] sem a missão cumprida: pausa e volta depois de [PAUSA_MINUTOS]. */
     private fun pausarEEncerrar() {
         _tocando.value?.let {
-            Agendador.agendarSoneca(this, it.id)
-            val volta = hhmm(LocalTime.now().plusMinutes(Agendador.SONECA_MINUTOS.toLong()))
-            Log.i(TAG, "Serviço: 10 min sem cumprir a missão, volta às $volta")
+            Agendador.tocarDaqui(this, it.id, PAUSA_MINUTOS * 60_000, gravar = true)
+            val volta = hhmm(LocalTime.now().plusMinutes(PAUSA_MINUTOS))
+            Log.i(TAG, "Serviço: ${LIMITE_TOCANDO_MS / 60_000} min sem cumprir a missão, volta às $volta")
             Toast.makeText(this, "Alarme volta às $volta", Toast.LENGTH_LONG).show()
         }
         encerrar()
@@ -261,13 +252,13 @@ class AlarmeService : Service() {
         val agora = hhmm(LocalTime.now())
         return NotificationCompat.Builder(this, Notificacoes.CANAL_ALARME)
             .setSmallIcon(R.drawable.ic_alarme)
-            .setContentTitle(alarme.rotulo.ifBlank { "Alarme" })
+            .setContentTitle(alarme.nome)
             .setContentText(if (alarme.missao) "$agora · diga STOP e olhe pra câmera" else "$agora · tocando")
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOngoing(true)
-            .setColor(0xFFB71C1C.toInt())
+            .setColor(getColor(R.color.vermelho_alarme))
             .setColorized(true)
             .setContentIntent(telaCheia)
             .setFullScreenIntent(telaCheia, true)

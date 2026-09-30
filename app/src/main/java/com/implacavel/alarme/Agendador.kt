@@ -8,19 +8,22 @@ import android.os.Build
 import java.time.ZonedDateTime
 
 /**
- * Agenda, adia e cancela disparos no AlarmManager do Android. Cada disparo é um broadcast para
- * [AlarmeReceiver] levando o id do alarme e se é uma soneca.
+ * Agenda e cancela disparos no AlarmManager do Android. Cada disparo é um broadcast para
+ * [AlarmeReceiver] levando o id do alarme e se é uma soneca. Cada alarme tem duas vagas, e uma não
+ * substitui a outra: o disparo normal (próxima ocorrência do horário) e a soneca (disparo avulso de
+ * [tocarDaqui]: botão de teste, pausa automática e retomada de alarme interrompido).
  */
 object Agendador {
     const val ACAO_DISPARAR = "com.implacavel.alarme.DISPARAR"
     const val EXTRA_ID = "id"
     const val EXTRA_SONECA = "soneca"
-    const val SONECA_MINUTOS = 5
 
-    /** Agenda a próxima ocorrência (ou cancela, se o alarme estiver desligado). Retorna quando vai tocar. */
+    /** Agenda a próxima ocorrência (ou a cancela, se o alarme estiver desligado). Retorna quando vai tocar. */
     fun agendar(ctx: Context, alarme: Alarme): ZonedDateTime? {
         if (!alarme.ativo) {
-            cancelar(ctx, alarme.id)
+            // Só o disparo normal: a soneca continua valendo. Um alarme de uma vez só fica desligado ao
+            // tocar; se o celular reiniciar no meio dele, a retomada fica na soneca e não pode ser perdida.
+            alarmManager(ctx).cancel(disparo(ctx, alarme.id, soneca = false))
             return null
         }
         val quando = alarme.proximoDisparo(ZonedDateTime.now())
@@ -28,11 +31,16 @@ object Agendador {
         return quando
     }
 
-    /** Adia o alarme. A soneca fica gravada no alarme pra aparecer na tela e sobreviver a um reinício. */
-    fun agendarSoneca(ctx: Context, id: Int) {
-        val quando = System.currentTimeMillis() + SONECA_MINUTOS * 60_000L
+    /**
+     * Faz o alarme tocar daqui a [ms] (o Android arredonda pra no mínimo uns 5 s), na vaga da soneca.
+     * Com [gravar], o horário fica em [Alarme.sonecaAte], pra aparecer na tela e sobreviver a um
+     * reinício do celular: a pausa automática precisa disso; a retomada não, porque já sobrevive por
+     * [Ajustes.alarmeEmAndamento], e não deve aparecer como soneca que dá pra cancelar.
+     */
+    fun tocarDaqui(ctx: Context, id: Int, ms: Long, gravar: Boolean = false) {
+        val quando = System.currentTimeMillis() + ms
         agendarEm(ctx, id, quando, soneca = true)
-        Alarmes.buscar(id)?.let { Alarmes.salvar(it.copy(sonecaAte = quando)) }
+        if (gravar) Alarmes.buscar(id)?.let { Alarmes.salvar(it.copy(sonecaAte = quando)) }
     }
 
     fun cancelarSoneca(ctx: Context, id: Int) {
@@ -40,20 +48,16 @@ object Agendador {
         Alarmes.buscar(id)?.takeIf { it.sonecaAte != null }?.let { Alarmes.salvar(it.copy(sonecaAte = null)) }
     }
 
-    /** Religa em instantes um alarme que foi interrompido no meio (usa o disparo de soneca). */
-    fun retomar(ctx: Context, id: Int) =
-        agendarEm(ctx, id, System.currentTimeMillis() + 2_000L, soneca = true)
-
-    fun agendarTeste(ctx: Context, segundos: Int) =
-        agendarEm(ctx, Alarme.ID_TESTE, System.currentTimeMillis() + segundos * 1_000L, soneca = false)
-
-    /** Cancela o disparo normal e a soneca. */
+    /** Cancela o disparo normal e a soneca (alarme excluído). */
     fun cancelar(ctx: Context, id: Int) {
         alarmManager(ctx).cancel(disparo(ctx, id, soneca = false))
         alarmManager(ctx).cancel(disparo(ctx, id, soneca = true))
     }
 
-    /** Refaz todos os agendamentos a partir do que está salvo (usado pelo [BootReceiver]). */
+    /**
+     * Refaz todos os agendamentos a partir do que está salvo. Chamado pelo [BootReceiver] (reiniciar o
+     * celular apaga tudo) e ao abrir o app (o "Forçar parada" também apaga).
+     */
     fun reagendarTodos(ctx: Context) {
         val agora = System.currentTimeMillis()
         Alarmes.lista.value.forEach { alarme ->
@@ -83,7 +87,7 @@ object Agendador {
         }
     }
 
-    /** Um PendingIntent por par (alarme, soneca): códigos distintos pra soneca não substituir o disparo normal. */
+    /** Um PendingIntent por vaga: códigos distintos (id * 2 e id * 2 + 1) pra soneca não substituir o disparo normal. */
     private fun disparo(ctx: Context, id: Int, soneca: Boolean): PendingIntent {
         val intent = Intent(ctx, AlarmeReceiver::class.java)
             .setAction(ACAO_DISPARAR)

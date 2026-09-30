@@ -37,9 +37,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
@@ -52,8 +49,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import kotlinx.coroutines.delay
-import java.time.LocalTime
 
 /**
  * Tela do alarme tocando. Aberta pela notificação em tela cheia do [AlarmeService]; aparece por
@@ -91,10 +86,9 @@ class AlarmeActivity : ComponentActivity() {
     }
 
     private fun acordarTela() {
-        if (Build.VERSION.SDK_INT >= 27) {
-            setShowWhenLocked(true)
-            setTurnScreenOn(true)
-        } else {
+        // Aparecer por cima da tela de bloqueio e acender a tela: do Android 8.1 em diante isso vem do
+        // manifesto (showWhenLocked e turnScreenOn); no 8.0, destas flags de janela
+        if (Build.VERSION.SDK_INT < 27) {
             @Suppress("DEPRECATION")
             window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
         }
@@ -108,24 +102,14 @@ private fun TelaAlarme(alarme: Alarme) {
     // A etapa vem do serviço (música calada = já disse STOP, falta a câmera). Assim ela sobrevive à
     // tela ser fechada ou recriada, e a vigia do serviço, ao religar a música, volta pra etapa de falar.
     val silenciado by AlarmeService.silenciado.collectAsStateWithLifecycle()
+    val agora = agoraACada(1_000)
 
     // Na etapa da câmera a tela fica clara e no brilho máximo, pra iluminar o rosto no escuro
     val claro = alarme.missao && silenciado
     BrilhoMaximo(claro)
-    val corTexto = if (claro) Color(0xFF3B0000) else Color.White
-    val fundo = if (claro) {
-        listOf(Color(0xFFFFFBF2), Color(0xFFFFE0B2))
-    } else {
-        listOf(Color(0xFFB71C1C), Color(0xFF3B0000), Color.Black)
-    }
+    val corTexto = if (claro) VinhoAlarme else Color.White
+    val fundo = if (claro) listOf(Color(0xFFFFFBF2), Color(0xFFFFE0B2)) else listOf(VermelhoAlarme, VinhoAlarme, Color.Black)
 
-    var agora by remember { mutableStateOf(LocalTime.now()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            agora = LocalTime.now()
-            delay(1_000)
-        }
-    }
     val escala by rememberInfiniteTransition(label = "pulso").animateFloat(
         initialValue = 1f,
         targetValue = 1.18f,
@@ -153,8 +137,8 @@ private fun TelaAlarme(alarme: Alarme) {
                     tint = corTexto,
                     modifier = Modifier.size(56.dp).scale(escala),
                 )
-                Text(hhmm(agora), color = corTexto, fontSize = 72.sp, fontWeight = FontWeight.Bold)
-                Text(alarme.rotulo.ifBlank { "Alarme" }, color = corTexto, fontSize = 22.sp, textAlign = TextAlign.Center)
+                Text(hhmm(agora.toLocalTime()), color = corTexto, fontSize = 72.sp, fontWeight = FontWeight.Bold)
+                Text(alarme.nome, color = corTexto, fontSize = 22.sp, textAlign = TextAlign.Center)
             }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Spacer(Modifier.height(16.dp))
@@ -175,16 +159,12 @@ private fun TelaAlarme(alarme: Alarme) {
 /** Botão grande das telas do alarme: branco no fundo vermelho, vermelho no fundo claro. */
 @Composable
 fun BotaoGrande(texto: String, onClick: () -> Unit, fundoClaro: Boolean = false) {
-    val cores = if (fundoClaro) {
-        ButtonDefaults.buttonColors(containerColor = Color(0xFFB71C1C), contentColor = Color.White)
-    } else {
-        ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color(0xFFB71C1C))
-    }
+    val (fundo, letra) = if (fundoClaro) VermelhoAlarme to Color.White else Color.White to VermelhoAlarme
     Button(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth().height(76.dp),
         shape = RoundedCornerShape(24.dp),
-        colors = cores,
+        colors = ButtonDefaults.buttonColors(containerColor = fundo, contentColor = letra),
     ) { Text(texto, fontSize = 24.sp, fontWeight = FontWeight.Black) }
 }
 

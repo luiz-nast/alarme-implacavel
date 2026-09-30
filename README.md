@@ -18,15 +18,15 @@ App Android de despertador feito pra ser impossível de ignorar. Ele toma a tela
 | Missão, etapa 2: olhar pra câmera | Câmera frontal num círculo com anel de progresso: enche olhando de olhos abertos, esvazia 2× mais rápido sem olhar (piscadas de até 0,6 s não contam) | `CameraOlhos.kt`, `Missao.kt` |
 | Feedback visual da câmera | Anel e texto verde (olhando), âmbar (de lado) ou vermelho (olhos fechados, sem rosto); tela clara no brilho máximo pra iluminar o rosto | `Missao.kt`, `AlarmeActivity.kt` |
 | Não dá pra enrolar | 20 s sem olhar pra câmera: a música volta e a missão recomeça (a vigia fica no serviço) | `AlarmeService.kt` |
-| Fechar a tela não adianta | Home, arrastar o app ou apagar a tela com o alarme ativo: em 1 s a música volta e uma nova notificação em tela cheia reabre o alarme (no Galaxy S24 FE, 2,5 a 4,8 s no total) | `AlarmeActivity.kt`, `AlarmeService.kt` |
-| Desligar o celular não adianta | O alarme em andamento fica gravado até ser cumprido; quando o processo volta (celular ligado de novo, app reaberto), ele toca de novo em 2 s | `Ajustes.kt`, `App.kt` |
+| Fechar a tela não adianta | Home, arrastar o app ou apagar a tela com o alarme ativo: em 1 s a música volta e uma nova notificação em tela cheia reabre o alarme (no Galaxy S24 FE, 1,3 a 3,6 s no total) | `AlarmeActivity.kt`, `AlarmeService.kt` |
+| Desligar o celular não adianta | O alarme em andamento fica gravado até ser cumprido; quando o processo volta (celular ligado de novo, app reaberto), ele toca de novo em poucos segundos | `Ajustes.kt`, `App.kt` |
 | Sem botão de adiar | Só desliga cumprindo a missão | `AlarmeActivity.kt` |
 | Volume travado no máximo (opcional) | A cada 1 s, restaura o volume de alarme se alguém abaixar | `Sirene.kt` |
 | Pausa música e vídeo de outros apps | Foco de áudio `AUDIOFOCUS_GAIN_TRANSIENT` | `Sirene.kt` |
 | Notificação que não some | `setDeleteIntent` reexibe a notificação se o usuário arrastar (Android 14+) | `AlarmeService.kt` |
 | Botões de volume não calam | `onKeyDown` consome volume-baixo e mudo | `AlarmeActivity.kt` |
-| Pausa automática | Sem a missão cumprida em 10 min (ex.: ninguém em casa), pausa 5 min e volta. A pausa fica gravada no alarme (`sonecaAte`), aparece na tela e sobrevive a reinício | `AlarmeService.kt`, `Agendador.kt`, `Cartoes.kt` |
-| Sobrevive a reinício | Reagenda no boot, inclusive antes do 1º desbloqueio (direct boot) | `BootReceiver.kt`, `Alarmes.kt` |
+| Pausa automática | Sem a missão cumprida em 10 min (ex.: ninguém em casa), pausa 5 min e volta. A pausa fica gravada no alarme (`sonecaAte`, via `tocarDaqui(…, gravar = true)`), aparece na tela e sobrevive a reinício | `AlarmeService.kt`, `Agendador.kt`, `Cartoes.kt` |
+| Sobrevive a reinício | Reagenda no boot, inclusive antes do 1º desbloqueio (direct boot), e toda vez que o app é aberto (não ao girar a tela) | `BootReceiver.kt`, `MainActivity.kt`, `Alarmes.kt` |
 | Repetição por dia da semana | `dias` usa `DayOfWeek.value` (1 = seg … 7 = dom) | `Alarme.kt` |
 | Checklist de permissões | Mostra o que falta e pede no diálogo do sistema ou abre a tela certa das Configurações | `Poderes.kt`, `Cartoes.kt` |
 
@@ -79,9 +79,10 @@ Estado compartilhado, sem ViewModel, injeção de dependência ou banco de dados
 
 Ciclo de vida de um disparo:
 
-1. `Agendador.agendar` cria um `PendingIntent` de broadcast. O código é `id * 2` pro disparo normal e `id * 2 + 1` pra soneca, pra um não substituir o outro.
+1. `Agendador.agendar` cria um `PendingIntent` de broadcast. Cada alarme tem duas vagas: `id * 2` pro disparo normal e `id * 2 + 1` pra soneca, pra um não substituir o outro. A soneca é o disparo avulso de `Agendador.tocarDaqui`, usado pelo botão de teste, pela pausa automática (a única gravada em `sonecaAte`) e pela retomada de alarme interrompido.
 2. `AlarmeReceiver` recebe e atualiza o alarme salvo:
    - soneca: limpa `sonecaAte`;
+   - disparo normal de alarme desligado (agendamento velho): ignora;
    - alarme de uma vez só: `ativo = false`;
    - alarme repetido: agenda a próxima repetição.
 
@@ -95,7 +96,7 @@ Ciclo de vida de um disparo:
 
    Com `missao = false`, aparece só o botão DESLIGAR.
 6. Enquanto o alarme dura, a `AlarmeActivity` avisa o serviço em `onStart`/`onStop` (`AlarmeService.tela`). Se a tela sumir por 1 s, o serviço religa a música e posta uma segunda notificação em tela cheia (`Notificacoes.ID_CHAMADA`), que reabre a tela, inclusive com o celular bloqueado.
-7. Missão cumprida (`parar`) ou pausa automática encerram o serviço e apagam `Ajustes.alarmeEmAndamento`; a limpeza acontece em `onDestroy`. Se o processo morrer antes disso, `App.onCreate` encontra o alarme em andamento e o religa com `Agendador.retomar`.
+7. Missão cumprida (`parar`) ou pausa automática encerram o serviço e apagam `Ajustes.alarmeEmAndamento`; a limpeza acontece em `onDestroy`. Se o processo morrer antes disso, `App.onCreate` encontra o alarme em andamento e o religa em poucos segundos com `Agendador.tocarDaqui` (o Android arredonda pra no mínimo uns 5 s).
 
 ## Mapa dos arquivos
 
@@ -103,27 +104,27 @@ Código em `app/src/main/java/com/implacavel/alarme/`. Cada arquivo começa com 
 
 | Arquivo | Responsabilidade |
 |---|---|
-| `App.kt` | Início do processo: carrega alarmes e ajustes e cria o canal de notificação |
-| `Alarme.kt` | Modelo e regras de quando toca (`proximoDisparo`, `proximoToque`, `sonecaPendente`), mais o JSON |
+| `App.kt` | Início do processo: carrega alarmes e ajustes, cria o canal de notificação e religa alarme interrompido. Também tem `TAG` (logs) e `prefsProtegidas` (armazenamento legível antes do 1º desbloqueio) |
+| `Alarme.kt` | Modelo e regras de quando toca (`proximoDisparo`, `proximoToque`, `sonecaPendente`), `nome` pra mostrar, mais o JSON |
 | `Alarmes.kt` | Repositório: lista em memória + gravação no armazenamento protegido pelo dispositivo |
-| `Ajustes.kt` | Música do alarme escolhida pelo usuário |
-| `Agendador.kt` | AlarmManager: agendar, soneca, cancelar, reagendar tudo |
+| `Ajustes.kt` | Música do alarme escolhida pelo usuário e o alarme em andamento |
+| `Agendador.kt` | AlarmManager: `agendar` (próxima ocorrência), `tocarDaqui` (teste, pausa, retomada), cancelar, reagendar tudo |
 | `AlarmeReceiver.kt` | Recebe o disparo, atualiza o alarme salvo e chama o serviço |
 | `BootReceiver.kt` | Reagenda depois de reiniciar, mudar relógio/fuso ou atualizar o app |
 | `AlarmeService.kt` | Serviço em primeiro plano: notificação, comandos (`tocar`, `parar`, `reexibir`, `tela`, `silenciar`, `olhando`, `volume`), vigia da missão, reabertura da tela, pausa automática |
 | `Sirene.kt` | Música em loop, vibração, foco de áudio, volume relativo e trava de volume |
 | `Notificacoes.kt` | Canal "Alarme tocando" (mudo de propósito; o som vem da `Sirene`) |
-| `Poderes.kt` | Permissões necessárias: checagem, diálogo do sistema ou tela das Configurações |
+| `Poderes.kt` | `enum Poder`: cada permissão necessária sabe se está `liberado`, qual permissão de diálogo falta e abrir a tela certa das Configurações |
 | `AlarmeActivity.kt` | Tela do alarme: relógio, etapa da missão (ou DESLIGAR), brilho máximo na etapa da câmera, aviso de tela aberta/fechada pro serviço |
 | `Missao.kt` | Etapas FALAR e OLHAR da missão, anel de progresso e textos de feedback |
 | `OuvinteStop.kt` | Reconhecimento de voz contínuo até ouvir "stop" |
 | `CameraOlhos.kt` | Câmera frontal (CameraX) + detecção de rosto (ML Kit) → `Leitura` a cada quadro |
 | `RegrasMissao.kt` | Regras puras da missão: `disseStop`, `classificarRosto`, `avancarOlhar`, tempos |
-| `MainActivity.kt` | Tela principal: estado, pedidos de permissão, seletor de música, lista |
+| `MainActivity.kt` | Tela principal: estado, pedidos de permissão, seletor de música, lista. Reagenda tudo ao abrir |
 | `Cartoes.kt` | Cabeçalho, cartão de permissões, cartão da música e cartão de cada alarme |
 | `EditorAlarme.kt` | Diálogo de criar e editar alarme |
 | `Formatacao.kt` | Textos de hora e dias (funções puras) |
-| `Tema.kt` | Cores claras e escuras |
+| `Tema.kt` | Tema claro e escuro, cores fixas da tela do alarme (`VermelhoAlarme`, `VinhoAlarme`) e o relógio `agoraACada` |
 
 Outros arquivos:
 
@@ -144,6 +145,7 @@ Outros arquivos:
 - **Piscar não derruba o anel.** A leitura da câmera oscila quadro a quadro entre "olhando" e "olhos fechados". Por isso só conta como "parou de olhar" depois de `TOLERANCIA_PISCADA_MS` (0,6 s) sem nenhum quadro de olhos abertos.
 - **Girar o celular não reinicia a missão.** A `AlarmeActivity` declara `configChanges`, então câmera e microfone seguem rodando. Antes, girar recriava a tela e voltava pro "diga STOP" com a música já calada.
 - **Sem adiar, e fugir da tela não funciona.** Não há botão de adiar. Fechar a tela do alarme de qualquer jeito reabre ela em poucos segundos: o serviço, vivo, posta uma notificação nova em tela cheia (`ID_CHAMADA`), que o Android abre por cima da tela de bloqueio. Desligar o celular só adia até ele ligar: `Ajustes.alarmeEmAndamento` sobrevive, e o `App` religa o alarme na próxima vez que o processo sobe (o `BootReceiver` garante isso no boot).
+- **Desligar um alarme só cancela a vaga normal.** `Agendador.agendar` com `ativo = false` não mexe na soneca. Um alarme de uma vez só fica desligado assim que toca; antes, se o celular reiniciasse no meio dele, o `BootReceiver` reagendava tudo e cancelava junto a retomada, e o alarme não voltava. Pelo mesmo motivo, o `AlarmeReceiver` ignora disparo normal de alarme desligado: é agendamento velho.
 - **A vigia da missão fica no serviço, não na tela.** Num teste, dizer "stop" e fechar a tela do alarme deixava a música calada até a soneca automática de 10 min: a regra dos 20 s morria junto com a tela. Agora a etapa vem de `AlarmeService.silenciado`, a tela só manda sinais de "olhando", e é o serviço (que continua vivo) quem religa a música.
 - **ML Kit com modelo embutido**, e não o baixado pelo Google Play Services: funciona offline e antes do primeiro desbloqueio. Custa ~8 MB por tipo de processador, por isso o APK só inclui ARM (`abiFilters`); o lint avisa da falta de x86 pra Chromebook, e isso é de propósito.
 - **ML Kit precisa de regra no R8.** O ML Kit cria partes de si mesmo por reflexão. No modo completo do R8 (padrão do AGP 9), os construtores delas sumiam e `FaceDetection.getClient` quebrava com `NullPointerException` ao abrir a câmera. `app/proguard-rules.pro` mantém `com.google.mlkit.**` e `com.google.android.gms.internal.mlkit_**` inteiros.
@@ -170,7 +172,7 @@ Outros arquivos:
 
 ## Limitações conhecidas
 
-- "Forçar parada" nas Configurações faz o Android cancelar os alarmes até o app ser aberto de novo.
+- "Forçar parada" nas Configurações faz o Android cancelar os alarmes até o app ser aberto de novo (ao abrir, a `MainActivity` reagenda tudo).
 - Se o Não Perturbe estiver configurado pra bloquear alarmes, o som não passa (o app não pede acesso ao Não Perturbe).
 - Na Samsung, o app não pode estar em "Apps em suspensão" (a tela principal avisa).
 - Antes do primeiro desbloqueio depois de reiniciar, a música escolhida e o reconhecimento de voz podem não estar disponíveis: tocam os bipes e aparece o botão "PARAR A MÚSICA".
@@ -191,6 +193,14 @@ Outros arquivos:
 | AndroidX core / activity-compose / lifecycle | 1.19.1 / 1.13.0 / 2.11.0 |
 | CameraX | 1.6.2 |
 | ML Kit face-detection (modelo embutido) | 16.1.7, sob os termos do ML Kit do Google |
+
+## Como estender
+
+- **Nova opção por alarme** (ex.: música própria de cada alarme): campo em `Alarme` com valor padrão, lido em `deJson` com `opt…` pra não quebrar alarmes já salvos; switch ou campo no `EditorAlarme`; uso no `AlarmeService` ou na `Sirene`.
+- **Nova etapa ou nova missão:** regra pura em `RegrasMissao.kt` com teste em `MissaoTest`, tela em `Missao.kt` e a escolha da etapa no `when` de `TelaAlarme` (`AlarmeActivity.kt`). O estado da etapa fica no serviço (como `AlarmeService.silenciado`), pra sobreviver à tela fechar.
+- **Novo comando pro serviço:** constante `ACAO_…`, função no companion do `AlarmeService` e ramo no `when` do `onStartCommand`.
+- **Nova permissão:** entrada no `enum Poder` com a checagem em `liberado` e a tela em `telaParaLiberar`. O cartão de permissões mostra sozinho.
+- **Novo disparo avulso** (ex.: soneca de verdade, lembrete): `Agendador.tocarDaqui(ctx, id, ms)`; com `gravar = true` ele aparece no cartão do alarme e sobrevive a reinício.
 
 ## Convenções pra quem for mexer (pessoa ou IA)
 

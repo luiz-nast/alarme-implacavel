@@ -41,6 +41,12 @@ class AlarmeTest {
     }
 
     @Test
+    fun nomeSemRotuloViraAlarme() {
+        assertEquals("Alarme", Alarme(1, 7, 0, rotulo = " ").nome)
+        assertEquals("Remédio", Alarme(1, 7, 0, rotulo = "Remédio").nome)
+    }
+
+    @Test
     fun sonecaPendenteContaComoProximoToque() {
         val agora = em(9, 29, 6, 45)
         val daquiCinco = agora.plusMinutes(5)

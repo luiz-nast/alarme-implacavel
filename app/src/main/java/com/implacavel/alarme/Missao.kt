@@ -4,7 +4,6 @@
 // (não olhou, ou fechou a tela), a vigia do serviço religa a música e a missão volta pra etapa 1.
 package com.implacavel.alarme
 
-import android.Manifest
 import android.util.Log
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.Canvas
@@ -107,7 +106,7 @@ fun EtapaFalar(onStop: () -> Unit) {
 fun EtapaOlhar(onOlhando: () -> Unit, onConcluiu: () -> Unit) {
     val ctx = LocalContext.current
     var leitura by remember { mutableStateOf(Leitura.SEM_ROSTO) }
-    if (!Poderes.concedida(ctx, Manifest.permission.CAMERA) || leitura == Leitura.SEM_CAMERA) {
+    if (!Poder.CAMERA.liberado(ctx) || leitura == Leitura.SEM_CAMERA) {
         // Sem câmera não dá pra conferir os olhos: desliga no botão
         BotaoGrande("DESLIGAR", onConcluiu, fundoClaro = true)
         return
@@ -141,8 +140,8 @@ fun EtapaOlhar(onOlhando: () -> Unit, onConcluiu: () -> Unit) {
     }
 
     // Enquanto conta como olhando, uma piscada não pinta a tela de vermelho
-    val exibida = if (olhando) Leitura.OLHANDO else leitura
-    val cor by animateColorAsState(corDaLeitura(exibida), label = "cor da leitura")
+    val (corAlvo, mensagem) = retorno(if (olhando) Leitura.OLHANDO else leitura)
+    val cor by animateColorAsState(corAlvo, label = "cor da leitura")
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(contentAlignment = Alignment.Center) {
             CameraOlhos(Modifier.size(220.dp).clip(CircleShape)) { nova ->
@@ -152,8 +151,8 @@ fun EtapaOlhar(onOlhando: () -> Unit, onConcluiu: () -> Unit) {
             AnelProgresso(progresso, cor, Modifier.size(252.dp))
         }
         Spacer(Modifier.height(16.dp))
-        Text(mensagemDaLeitura(exibida), color = cor, fontSize = 24.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-        Text("Mais ${segundosRestantes(progresso)} s de olhos abertos", color = Color(0xFF3B0000), fontSize = 16.sp)
+        Text(mensagem, color = cor, fontSize = 24.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+        Text("Mais ${segundosRestantes(progresso)} s de olhos abertos", color = VinhoAlarme, fontSize = 16.sp)
     }
 }
 
@@ -172,15 +171,10 @@ private fun AnelProgresso(progresso: Float, cor: Color, modifier: Modifier) {
     }
 }
 
-private fun corDaLeitura(leitura: Leitura) = when (leitura) {
-    Leitura.OLHANDO -> Color(0xFF2E7D32)
-    Leitura.DE_LADO -> Color(0xFFEF8F00)
-    else -> Color(0xFFC62828)
-}
-
-private fun mensagemDaLeitura(leitura: Leitura) = when (leitura) {
-    Leitura.OLHANDO -> "Isso! Continua olhando"
-    Leitura.DE_LADO -> "Olha direto pra câmera"
-    Leitura.OLHOS_FECHADOS -> "Abre esses olhos!"
-    Leitura.SEM_ROSTO, Leitura.SEM_CAMERA -> "Cadê você? Aproxima o rosto"
+/** O retorno visual de cada leitura da câmera: cor (verde, âmbar ou vermelho) e mensagem. */
+private fun retorno(leitura: Leitura): Pair<Color, String> = when (leitura) {
+    Leitura.OLHANDO -> Color(0xFF2E7D32) to "Isso! Continua olhando"
+    Leitura.DE_LADO -> Color(0xFFEF8F00) to "Olha direto pra câmera"
+    Leitura.OLHOS_FECHADOS -> Color(0xFFC62828) to "Abre esses olhos!"
+    Leitura.SEM_ROSTO, Leitura.SEM_CAMERA -> Color(0xFFC62828) to "Cadê você? Aproxima o rosto"
 }

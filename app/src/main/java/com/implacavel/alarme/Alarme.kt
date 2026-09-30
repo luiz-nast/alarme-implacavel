@@ -13,7 +13,8 @@ import java.time.ZonedDateTime
  *   Vazio = toca uma vez e se desliga sozinho.
  * @property missao só desliga dizendo STOP e olhando pra câmera de olhos abertos (veja Missao.kt).
  * @property volumeMaximo trava o volume de alarme no máximo enquanto toca (veja Sirene).
- * @property sonecaAte quando a soneca pendente toca (epoch em ms); null se o alarme não foi adiado.
+ * @property sonecaAte quando o disparo avulso pendente toca (epoch em ms): pausa automática ou
+ *   retomada de um alarme interrompido (veja [Agendador.tocarDaqui]); null se não há nenhum.
  */
 data class Alarme(
     val id: Int,
@@ -27,6 +28,9 @@ data class Alarme(
     val sonecaAte: Long? = null,
 ) {
     val horario: String get() = hhmm(hora, minuto)
+
+    /** Nome pra mostrar: o rótulo, ou "Alarme" se ele estiver em branco. */
+    val nome: String get() = rotulo.ifBlank { "Alarme" }
 
     /** Próximo horário que bate com hora, minuto e dias, estritamente depois de [agora]. */
     fun proximoDisparo(agora: ZonedDateTime): ZonedDateTime {

@@ -3,7 +3,6 @@ package com.implacavel.alarme
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
-import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -34,16 +33,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
-import androidx.core.net.toUri
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import kotlinx.coroutines.delay
 import java.time.ZonedDateTime
 
 /** Tela principal: permissões, música, botão de teste e lista de alarmes. */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // "Forçar parada" nas Configurações apaga os agendamentos do app; abrir o app os refaz. Só ao
+        // abrir, não ao recriar a tela (girar o celular): reagendar um alarme segundos depois da hora
+        // em que ele deveria tocar o joga pro dia seguinte.
+        if (savedInstanceState == null) Agendador.reagendarTodos(this)
         enableEdgeToEdge()
         setContent { TemaImplacavel { TelaPrincipal() } }
     }
@@ -54,16 +55,9 @@ private fun TelaPrincipal() {
     val ctx = LocalContext.current
     val alarmes by Alarmes.lista.collectAsStateWithLifecycle()
     val tocando by AlarmeService.tocando.collectAsStateWithLifecycle()
+    val musica by Ajustes.musica.collectAsStateWithLifecycle()
+    val agora = agoraACada(15_000) // pros textos "toca em 9 h 12 min"
     var editando by remember { mutableStateOf<Alarme?>(null) }
-
-    // Relógio da tela, usado nos textos "toca em 9 h 12 min"
-    var agora by remember { mutableStateOf(ZonedDateTime.now()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(15_000)
-            agora = ZonedDateTime.now()
-        }
-    }
 
     // Permissões: relidas toda vez que a tela volta (ex.: depois de liberar algo nas Configurações)
     var poderes by remember { mutableStateOf(lerPoderes(ctx)) }
@@ -76,24 +70,21 @@ private fun TelaPrincipal() {
     // sistema não pergunta de novo; aí, se o pedido veio de um botão "Liberar", abre as Configurações.
     var pedidoDoBotao by remember { mutableStateOf<Poder?>(null) }
     val pedirPermissao = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
-        pedidoDoBotao?.let { if (!ok) abrirConfiguracao(ctx, it) }
+        pedidoDoBotao?.let { if (!ok) it.abrirConfiguracao(ctx) }
         pedidoDoBotao = null
         poderes = lerPoderes(ctx)
     }
-    LaunchedEffect(Unit) {
-        Poder.NOTIFICACOES.permissao?.takeUnless { Poderes.concedida(ctx, it) }?.let { pedirPermissao.launch(it) }
-    }
+    LaunchedEffect(Unit) { Poder.NOTIFICACOES.permissaoFaltando(ctx)?.let { pedirPermissao.launch(it) } }
     val liberar: (Poder) -> Unit = { poder ->
-        val permissao = poder.permissao
-        if (permissao != null && !Poderes.concedida(ctx, permissao)) {
+        val faltando = poder.permissaoFaltando(ctx)
+        if (faltando != null) {
             pedidoDoBotao = poder
-            pedirPermissao.launch(permissao)
+            pedirPermissao.launch(faltando)
         } else {
-            abrirConfiguracao(ctx, poder)
+            poder.abrirConfiguracao(ctx)
         }
     }
 
-    val musica by Ajustes.musica.collectAsStateWithLifecycle()
     val escolherMusica = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) Ajustes.escolherMusica(ctx, uri)
     }
@@ -123,7 +114,7 @@ private fun TelaPrincipal() {
                     Button(
                         onClick = { ctx.startActivity(Intent(ctx, AlarmeActivity::class.java)) },
                         modifier = Modifier.fillMaxWidth().height(56.dp),
-                    ) { Text("⏰ ${alarme.rotulo.ifBlank { "Alarme" }} tocando · abrir") }
+                    ) { Text("⏰ ${alarme.nome} tocando · abrir") }
                 }
             }
             item { CartaoPoderes(poderes, liberar) }
@@ -137,7 +128,7 @@ private fun TelaPrincipal() {
             item {
                 OutlinedButton(
                     onClick = {
-                        Agendador.agendarTeste(ctx, 10)
+                        Agendador.tocarDaqui(ctx, Alarme.ID_TESTE, 10_000)
                         Toast.makeText(ctx, "Toca em 10 segundos. Bloqueie a tela pra ver o efeito completo.", Toast.LENGTH_LONG).show()
                     },
                     modifier = Modifier.fillMaxWidth(),
@@ -185,14 +176,7 @@ private fun TelaPrincipal() {
     }
 }
 
-private fun lerPoderes(ctx: Context) = Poder.entries.associateWith { Poderes.liberado(ctx, it) }
-
-private fun abrirConfiguracao(ctx: Context, poder: Poder) {
-    runCatching { ctx.startActivity(Poderes.telaParaLiberar(ctx, poder)) }.onFailure {
-        // Nem todo celular tem a tela específica; aí abre as informações do app
-        ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:${ctx.packageName}".toUri()))
-    }
-}
+private fun lerPoderes(ctx: Context) = Poder.entries.associateWith { it.liberado(ctx) }
 
 private fun salvarEAgendar(ctx: Context, alarme: Alarme) {
     Alarmes.salvar(alarme)

@@ -13,8 +13,8 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Ajustes e estado que precisam sobreviver ao processo: a música do alarme (um arquivo de áudio
- * escolhido pelo usuário no celular; o app não traz música) e o alarme em andamento. Gravado no
- * mesmo armazenamento protegido pelo dispositivo dos alarmes.
+ * escolhido pelo usuário no celular; o app não traz música) e o alarme em andamento. Gravado em
+ * [prefsProtegidas], como os alarmes.
  */
 object Ajustes {
     data class Musica(val uri: String, val nome: String)
@@ -33,7 +33,7 @@ object Ajustes {
 
     /** Chamado uma vez em [App.onCreate]. */
     fun carregar(ctx: Context) {
-        prefs = ctx.createDeviceProtectedStorageContext().getSharedPreferences("ajustes", Context.MODE_PRIVATE)
+        prefs = ctx.prefsProtegidas("ajustes")
         _musica.value = prefs.getString("musicaUri", null)?.let { Musica(it, prefs.getString("musicaNome", null) ?: "Música") }
     }
 

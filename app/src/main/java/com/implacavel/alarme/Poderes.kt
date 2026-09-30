@@ -15,8 +15,9 @@ import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 
 /**
- * Cada permissão que o alarme precisa. [permissao] é a permissão pedida com o diálogo do sistema,
- * quando existe; as demais são liberadas numa tela das Configurações ([Poderes.telaParaLiberar]).
+ * Cada permissão que o alarme precisa, com a checagem ([liberado]) e o jeito de liberar.
+ * [permissao] é a permissão pedida com o diálogo do sistema, quando existe; as demais, e as já
+ * negadas no diálogo, são liberadas numa tela das Configurações ([abrirConfiguracao]).
  */
 enum class Poder(val titulo: String, val explicacao: String, val permissao: String? = null) {
     NOTIFICACOES(
@@ -29,42 +30,44 @@ enum class Poder(val titulo: String, val explicacao: String, val permissao: Stri
     ALARME_EXATO("Alarme no minuto exato", "Toca na hora certa mesmo com o celular dormindo."),
     TELA_CHEIA("Tela cheia", "Deixa o alarme tomar a tela, mesmo bloqueada."),
     CANAL("Alerta em destaque", "O canal \"Alarme tocando\" precisa estar com importância alta."),
-    BATERIA("Bateria sem restrição", "Impede o celular de colocar o app pra dormir."),
-}
+    BATERIA("Bateria sem restrição", "Impede o celular de colocar o app pra dormir.");
 
-object Poderes {
-    fun concedida(ctx: Context, permissao: String): Boolean =
-        ContextCompat.checkSelfPermission(ctx, permissao) == PackageManager.PERMISSION_GRANTED
-
-    fun liberado(ctx: Context, poder: Poder): Boolean = when (poder) {
-        Poder.NOTIFICACOES -> NotificationManagerCompat.from(ctx).areNotificationsEnabled()
-        Poder.MICROFONE -> concedida(ctx, Manifest.permission.RECORD_AUDIO)
-        Poder.CAMERA -> concedida(ctx, Manifest.permission.CAMERA)
-        Poder.ALARME_EXATO ->
+    fun liberado(ctx: Context): Boolean = when (this) {
+        NOTIFICACOES -> NotificationManagerCompat.from(ctx).areNotificationsEnabled()
+        MICROFONE, CAMERA -> permissaoFaltando(ctx) == null
+        ALARME_EXATO ->
             Build.VERSION.SDK_INT < 31 || ctx.getSystemService(AlarmManager::class.java).canScheduleExactAlarms()
-        Poder.TELA_CHEIA ->
+        TELA_CHEIA ->
             Build.VERSION.SDK_INT < 34 || ctx.getSystemService(NotificationManager::class.java).canUseFullScreenIntent()
-        Poder.CANAL -> {
+        CANAL -> {
             val canal = ctx.getSystemService(NotificationManager::class.java).getNotificationChannel(Notificacoes.CANAL_ALARME)
             canal == null || canal.importance >= NotificationManager.IMPORTANCE_HIGH
         }
-        Poder.BATERIA -> ctx.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName)
+        BATERIA -> ctx.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName)
     }
 
-    /** Tela das Configurações onde esse poder é liberado (pras permissões já negadas no diálogo, a do app). */
-    @SuppressLint("BatteryLife", "InlinedApi")
-    fun telaParaLiberar(ctx: Context, poder: Poder): Intent {
-        val pacote = "package:${ctx.packageName}".toUri()
-        return when (poder) {
-            Poder.NOTIFICACOES -> Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                .putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName)
-            Poder.MICROFONE, Poder.CAMERA -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pacote)
-            Poder.ALARME_EXATO -> Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, pacote)
-            Poder.TELA_CHEIA -> Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, pacote)
-            Poder.CANAL -> Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
-                .putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName)
-                .putExtra(Settings.EXTRA_CHANNEL_ID, Notificacoes.CANAL_ALARME)
-            Poder.BATERIA -> Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, pacote)
-        }
+    /** A permissão do diálogo do sistema, se ainda falta; null se já foi dada ou se este poder não tem diálogo. */
+    fun permissaoFaltando(ctx: Context): String? =
+        permissao?.takeUnless { ContextCompat.checkSelfPermission(ctx, it) == PackageManager.PERMISSION_GRANTED }
+
+    /** Abre a tela das Configurações onde este poder é liberado; se o celular não tiver essa tela, a do app. */
+    fun abrirConfiguracao(ctx: Context) {
+        runCatching { ctx.startActivity(telaParaLiberar(ctx)) }
+            .onFailure { ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pacote(ctx))) }
     }
+
+    @SuppressLint("BatteryLife", "InlinedApi")
+    private fun telaParaLiberar(ctx: Context): Intent = when (this) {
+        NOTIFICACOES -> Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName)
+        MICROFONE, CAMERA -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pacote(ctx))
+        ALARME_EXATO -> Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, pacote(ctx))
+        TELA_CHEIA -> Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, pacote(ctx))
+        CANAL -> Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+            .putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName)
+            .putExtra(Settings.EXTRA_CHANNEL_ID, Notificacoes.CANAL_ALARME)
+        BATERIA -> Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, pacote(ctx))
+    }
+
+    private fun pacote(ctx: Context) = "package:${ctx.packageName}".toUri()
 }

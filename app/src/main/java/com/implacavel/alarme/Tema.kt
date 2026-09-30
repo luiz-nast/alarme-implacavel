@@ -1,3 +1,4 @@
+// Aparência compartilhada pelas telas: tema claro/escuro, cores fixas da tela do alarme e o relógio agoraACada.
 package com.implacavel.alarme
 
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -5,7 +6,18 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
+import kotlinx.coroutines.delay
+import java.time.ZonedDateTime
+
+/** Cores da tela do alarme, que não segue o tema do sistema. O vermelho é o mesmo de R.color.vermelho_alarme. */
+val VermelhoAlarme = Color(0xFFB71C1C)
+val VinhoAlarme = Color(0xFF3B0000)
 
 private val Claro = lightColorScheme(
     primary = Color(0xFFB3261E),
@@ -57,4 +69,17 @@ private val Escuro = darkColorScheme(
 @Composable
 fun TemaImplacavel(escuro: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
     MaterialTheme(colorScheme = if (escuro) Escuro else Claro, content = content)
+}
+
+/** Hora atual, que se atualiza sozinha a cada [intervaloMs] (relógio da tela do alarme, textos "toca em 9 h"). */
+@Composable
+fun agoraACada(intervaloMs: Long): ZonedDateTime {
+    var agora by remember { mutableStateOf(ZonedDateTime.now()) }
+    LaunchedEffect(intervaloMs) {
+        while (true) {
+            delay(intervaloMs)
+            agora = ZonedDateTime.now()
+        }
+    }
+    return agora
 }
