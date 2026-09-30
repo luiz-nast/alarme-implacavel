@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.util.Log
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -96,6 +97,7 @@ class AlarmeService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // Comandos que chegam quando o alarme já acabou só encerram o serviço
         val alarme = _tocando.value
+        if (intent?.action != ACAO_VOLUME) Log.i(TAG, "Serviço: comando ${intent?.action}")
         when (intent?.action) {
             ACAO_TOCAR -> iniciar(intent.getIntExtra(Agendador.EXTRA_ID, -1))
             ACAO_ADIAR -> adiarEEncerrar()
@@ -110,6 +112,7 @@ class AlarmeService : Service() {
     }
 
     override fun onDestroy() {
+        Log.i(TAG, "Serviço: alarme encerrado")
         handler.removeCallbacks(esgotou)
         sirene.desligar()
         _tocando.value = null
@@ -125,6 +128,7 @@ class AlarmeService : Service() {
             encerrar()
             return
         }
+        Log.i(TAG, "Serviço: tocando \"${alarme.rotulo}\" (missão=${alarme.missao}, volume máximo=${alarme.volumeMaximo})")
         _tocando.value = alarme
         mostrarNotificacao(alarme)
         sirene.ligar(alarme.volumeMaximo)

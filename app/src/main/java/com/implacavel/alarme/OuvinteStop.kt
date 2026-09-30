@@ -9,6 +9,7 @@ import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import android.util.Log
 
 /**
  * Escuta o microfone sem parar até ouvir "stop" (regra em [disseStop]). Usa o reconhecedor de voz do
@@ -27,10 +28,14 @@ class OuvinteStop(
     private var falhasSeguidas = 0
 
     fun comecar() {
-        if (!Poderes.concedida(ctx, Manifest.permission.RECORD_AUDIO) || !SpeechRecognizer.isRecognitionAvailable(ctx)) {
+        val microfone = Poderes.concedida(ctx, Manifest.permission.RECORD_AUDIO)
+        val reconhecimento = SpeechRecognizer.isRecognitionAvailable(ctx)
+        if (!microfone || !reconhecimento) {
+            Log.w(TAG, "Voz: indisponível (microfone=$microfone, reconhecimento=$reconhecimento)")
             onIndisponivel()
             return
         }
+        Log.i(TAG, "Voz: escutando")
         reconhecedor = SpeechRecognizer.createSpeechRecognizer(ctx).also { it.setRecognitionListener(this) }
         escutar()
     }
@@ -57,7 +62,9 @@ class OuvinteStop(
     private fun conferir(resultado: Bundle?) {
         val frases = resultado?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
         frases.firstOrNull()?.let(onOuviu)
+        if (frases.isNotEmpty()) Log.i(TAG, "Voz ouviu: $frases")
         if (frases.any(::disseStop)) {
+            Log.i(TAG, "Voz: STOP reconhecido")
             parar()
             onStop()
         }
@@ -79,6 +86,7 @@ class OuvinteStop(
             SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> falhasSeguidas = LIMITE_FALHAS
             else -> falhasSeguidas++
         }
+        Log.i(TAG, "Voz: erro $error do reconhecedor (falhas seguidas: $falhasSeguidas)")
         if (falhasSeguidas >= LIMITE_FALHAS) {
             parar()
             onIndisponivel()

@@ -1,5 +1,6 @@
 package com.implacavel.alarme
 
+import android.util.Log
 import androidx.annotation.OptIn
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ExperimentalGetImage
@@ -56,7 +57,11 @@ fun CameraOlhos(modifier: Modifier, onLeitura: (Leitura) -> Unit) {
                 val cameras = futuro.get()
                 cameras.unbindAll()
                 cameras.bindToLifecycle(dono, CameraSelector.DEFAULT_FRONT_CAMERA, preview, analise)
-            }.onFailure { informar(Leitura.SEM_CAMERA) }
+                Log.i(TAG, "Câmera: aberta")
+            }.onFailure {
+                Log.w(TAG, "Câmera: não abriu", it)
+                informar(Leitura.SEM_CAMERA)
+            }
         }, ContextCompat.getMainExecutor(ctx))
         onDispose {
             descartado = true

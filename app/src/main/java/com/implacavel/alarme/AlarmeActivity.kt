@@ -41,6 +41,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -96,7 +97,8 @@ class AlarmeActivity : ComponentActivity() {
 @Composable
 private fun TelaAlarme(alarme: Alarme) {
     val ctx = LocalContext.current
-    var etapa by remember { mutableStateOf(Etapa.FALAR) }
+    // Saveable: se a tela for recriada, a missão continua na mesma etapa (a música já pode estar calada)
+    var etapa by rememberSaveable { mutableStateOf(Etapa.FALAR) }
 
     // Na etapa da câmera a tela fica clara e no brilho máximo, pra iluminar o rosto no escuro
     val claro = alarme.missao && etapa == Etapa.OLHAR

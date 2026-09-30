@@ -40,6 +40,13 @@ class MissaoTest {
     }
 
     @Test
+    fun piscadaCurtaAindaContaComoOlhando() {
+        assertTrue(olhandoComTolerancia(agoraMs = 10_000, ultimaOlhadaMs = 9_500))
+        assertFalse(olhandoComTolerancia(agoraMs = 10_000, ultimaOlhadaMs = 9_300))
+        assertFalse(olhandoComTolerancia(agoraMs = 10_000, ultimaOlhadaMs = 0)) // nunca olhou
+    }
+
+    @Test
     fun anelEncheOlhandoEEsvaziaDuasVezesMaisRapido() {
         var progresso = 0f
         repeat(50) { progresso = avancarOlhar(progresso, olhando = true, passoMs = 100) }

@@ -59,8 +59,10 @@
 
         <!-- Tela do alarme: aparece por cima da tela de bloqueio e funciona antes do primeiro desbloqueio.
              No Android 8.0 (API 26) o mesmo efeito vem das flags de janela em AlarmeActivity.acordarTela(). -->
+        <!-- configChanges: girar o celular não recria a tela, então câmera e microfone não reiniciam -->
         <activity
             android:name=".AlarmeActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             tools:targetApi="27"
             android:directBootAware="true"
             android:excludeFromRecents="true"

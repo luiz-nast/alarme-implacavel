@@ -11,8 +11,17 @@ const val META_OLHAR_MS = 10_000L
 /** Sem olhar pra câmera por esse tempo, a música volta a tocar e a missão recomeça. */
 const val DESISTENCIA_MS = 20_000L
 
+/**
+ * Piscar ou um quadro ruim da câmera não conta como "parou de olhar": só depois desse tempo sem
+ * nenhum quadro de olhos abertos. Sem isso, a leitura oscila a cada quadro e o anel não enche.
+ */
+const val TOLERANCIA_PISCADA_MS = 600L
+
 /** O que a câmera está vendo agora. */
 enum class Leitura { SEM_CAMERA, SEM_ROSTO, DE_LADO, OLHOS_FECHADOS, OLHANDO }
+
+/** Conta como olhando se o último quadro de olhos abertos foi há menos de [TOLERANCIA_PISCADA_MS]. */
+fun olhandoComTolerancia(agoraMs: Long, ultimaOlhadaMs: Long): Boolean = agoraMs - ultimaOlhadaMs < TOLERANCIA_PISCADA_MS
 
 /** Aceita "stop" e jeitos de falar ou transcrever com sotaque ("estop", "istópi", "stopi"). */
 fun disseStop(texto: String): Boolean {

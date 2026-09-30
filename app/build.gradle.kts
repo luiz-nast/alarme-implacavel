@@ -27,7 +27,7 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             // Assinado com a chave de debug: basta pra instalar no seu próprio celular
             signingConfig = signingConfigs.getByName("debug")
         }

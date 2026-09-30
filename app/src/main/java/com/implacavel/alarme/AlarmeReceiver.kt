@@ -3,12 +3,14 @@ package com.implacavel.alarme
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 
 /** Recebe o disparo agendado pelo [Agendador], atualiza o alarme salvo e põe o [AlarmeService] pra tocar. */
 class AlarmeReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         if (intent.action != Agendador.ACAO_DISPARAR) return
         val id = intent.getIntExtra(Agendador.EXTRA_ID, -1)
+        Log.i(TAG, "Disparo recebido: alarme $id, soneca=${intent.getBooleanExtra(Agendador.EXTRA_SONECA, false)}")
         if (id != Alarme.ID_TESTE) {
             val alarme = Alarmes.buscar(id) ?: return // foi apagado depois de agendado
             when {

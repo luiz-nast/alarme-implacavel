@@ -13,6 +13,7 @@ import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.util.Log
 import androidx.core.net.toUri
 
 /**
@@ -97,9 +98,11 @@ class Sirene(private val ctx: Context) {
                 mp.start()
             }.isSuccess
             if (tocou) {
+                Log.i(TAG, "Sirene: tocando $uri")
                 player = mp
                 return
             }
+            Log.w(TAG, "Sirene: não conseguiu tocar $uri")
             mp.release()
         }
     }

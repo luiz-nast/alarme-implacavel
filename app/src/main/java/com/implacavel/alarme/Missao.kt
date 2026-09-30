@@ -4,6 +4,7 @@
 package com.implacavel.alarme
 
 import android.Manifest
+import android.util.Log
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
@@ -18,6 +19,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -103,32 +105,45 @@ fun EtapaOlhar(onConcluiu: () -> Unit, onDesistiu: () -> Unit) {
     val concluir by rememberUpdatedState(onConcluiu)
     val desistir by rememberUpdatedState(onDesistiu)
     var progresso by remember { mutableFloatStateOf(0f) }
+    var ultimaOlhada by remember { mutableLongStateOf(0L) } // último quadro com olhos abertos
+    var olhando by remember { mutableStateOf(false) } // já com a tolerância a piscadas
     LaunchedEffect(Unit) {
-        var ultimaOlhada = System.currentTimeMillis()
+        val inicio = System.currentTimeMillis()
         while (true) {
             delay(PASSO_MS)
-            val olhando = leitura == Leitura.OLHANDO
-            if (olhando) ultimaOlhada = System.currentTimeMillis()
+            val agora = System.currentTimeMillis()
+            val agoraOlhando = olhandoComTolerancia(agora, ultimaOlhada)
+            if (agoraOlhando != olhando) {
+                olhando = agoraOlhando
+                Log.i(TAG, "Câmera: ${if (olhando) "olhando" else "parou de olhar ($leitura)"}, anel ${(progresso * 100).toInt()}%")
+            }
             progresso = avancarOlhar(progresso, olhando, PASSO_MS)
             if (progresso >= 1f) {
+                Log.i(TAG, "Missão: anel completo, alarme desligado")
                 concluir()
                 break
             }
-            if (System.currentTimeMillis() - ultimaOlhada > DESISTENCIA_MS) {
+            if (agora - maxOf(ultimaOlhada, inicio) > DESISTENCIA_MS) {
+                Log.i(TAG, "Missão: ${DESISTENCIA_MS / 1000} s sem olhar, música volta")
                 desistir()
                 break
             }
         }
     }
 
-    val cor by animateColorAsState(corDaLeitura(leitura), label = "cor da leitura")
+    // Enquanto conta como olhando, uma piscada não pinta a tela de vermelho
+    val exibida = if (olhando) Leitura.OLHANDO else leitura
+    val cor by animateColorAsState(corDaLeitura(exibida), label = "cor da leitura")
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(contentAlignment = Alignment.Center) {
-            CameraOlhos(Modifier.size(220.dp).clip(CircleShape)) { leitura = it }
+            CameraOlhos(Modifier.size(220.dp).clip(CircleShape)) { nova ->
+                leitura = nova
+                if (nova == Leitura.OLHANDO) ultimaOlhada = System.currentTimeMillis()
+            }
             AnelProgresso(progresso, cor, Modifier.size(252.dp))
         }
         Spacer(Modifier.height(16.dp))
-        Text(mensagemDaLeitura(leitura), color = cor, fontSize = 24.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+        Text(mensagemDaLeitura(exibida), color = cor, fontSize = 24.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
         Text("Mais ${segundosRestantes(progresso)} s de olhos abertos", color = Color(0xFF3B0000), fontSize = 16.sp)
     }
 }
