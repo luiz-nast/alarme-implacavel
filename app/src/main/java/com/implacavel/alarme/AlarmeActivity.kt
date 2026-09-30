@@ -14,7 +14,6 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -33,7 +32,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -80,6 +78,17 @@ class AlarmeActivity : ComponentActivity() {
     // Abaixar ou silenciar pelos botões laterais não cala o alarme
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean =
         keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_MUTE || super.onKeyDown(keyCode, event)
+
+    // Fechar esta tela no meio (Home, arrastar o app, apagar a tela) faz o serviço reabri-la em segundos
+    override fun onStart() {
+        super.onStart()
+        AlarmeService.tela(this, aberta = true)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (!isChangingConfigurations) AlarmeService.tela(this, aberta = false)
+    }
 
     private fun acordarTela() {
         if (Build.VERSION.SDK_INT >= 27) {
@@ -157,13 +166,7 @@ private fun TelaAlarme(alarme: Alarme) {
                         onConcluiu = { AlarmeService.parar(ctx) },
                     )
                 }
-                Spacer(Modifier.height(16.dp))
-                OutlinedButton(
-                    onClick = { AlarmeService.adiar(ctx) },
-                    modifier = Modifier.fillMaxWidth().height(56.dp),
-                    border = BorderStroke(1.dp, corTexto.copy(alpha = 0.6f)),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = corTexto),
-                ) { Text("Adiar ${Agendador.SONECA_MINUTOS} min", fontSize = 18.sp) }
+                Spacer(Modifier.height(24.dp))
             }
         }
     }

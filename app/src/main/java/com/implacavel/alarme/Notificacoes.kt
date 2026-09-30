@@ -10,6 +10,9 @@ object Notificacoes {
     const val CANAL_ALARME = "alarme"
     const val ID_TOCANDO = 1
 
+    /** Segunda notificação em tela cheia, postada pra reabrir a tela do alarme quando ela é fechada no meio. */
+    const val ID_CHAMADA = 2
+
     fun criarCanal(ctx: Context) {
         val canal = NotificationChannel(CANAL_ALARME, "Alarme tocando", NotificationManager.IMPORTANCE_HIGH).apply {
             description = "Aparece em tela cheia quando um alarme dispara"

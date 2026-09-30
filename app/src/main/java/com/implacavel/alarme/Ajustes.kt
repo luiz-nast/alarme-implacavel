@@ -12,8 +12,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * Ajustes gerais do app. Hoje só a música do alarme: um arquivo de áudio escolhido pelo usuário no
- * celular (o app não traz música). Gravado no mesmo armazenamento protegido pelo dispositivo dos alarmes.
+ * Ajustes e estado que precisam sobreviver ao processo: a música do alarme (um arquivo de áudio
+ * escolhido pelo usuário no celular; o app não traz música) e o alarme em andamento. Gravado no
+ * mesmo armazenamento protegido pelo dispositivo dos alarmes.
  */
 object Ajustes {
     data class Musica(val uri: String, val nome: String)
@@ -21,6 +22,14 @@ object Ajustes {
     private lateinit var prefs: SharedPreferences
     private val _musica = MutableStateFlow<Musica?>(null)
     val musica: StateFlow<Musica?> = _musica.asStateFlow()
+
+    /**
+     * Alarme tocando que ainda não foi cumprido. Se o processo morrer no meio (celular desligado,
+     * app encerrado), o [App] vê isto ao voltar e religa o alarme.
+     */
+    var alarmeEmAndamento: Int?
+        get() = prefs.getInt("emAndamento", -1).takeIf { it >= 0 }
+        set(id) = prefs.edit(commit = true) { if (id == null) remove("emAndamento") else putInt("emAndamento", id) }
 
     /** Chamado uma vez em [App.onCreate]. */
     fun carregar(ctx: Context) {

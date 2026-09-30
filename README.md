@@ -17,13 +17,15 @@ App Android de despertador feito pra ser impossível de ignorar. Ele toma a tela
 | Missão, etapa 1: dizer STOP | Reconhecedor de voz do sistema em loop; a música alterna 5 s alta e 4 s a 25% pra voz ser ouvida | `OuvinteStop.kt`, `Missao.kt` |
 | Missão, etapa 2: olhar pra câmera | Câmera frontal num círculo com anel de progresso: enche olhando de olhos abertos, esvazia 2× mais rápido sem olhar (piscadas de até 0,6 s não contam) | `CameraOlhos.kt`, `Missao.kt` |
 | Feedback visual da câmera | Anel e texto verde (olhando), âmbar (de lado) ou vermelho (olhos fechados, sem rosto); tela clara no brilho máximo pra iluminar o rosto | `Missao.kt`, `AlarmeActivity.kt` |
-| Não dá pra enrolar | 20 s sem olhar pra câmera: a música volta e a missão recomeça. Vale também se a tela do alarme for fechada, porque a vigia fica no serviço | `AlarmeService.kt` |
+| Não dá pra enrolar | 20 s sem olhar pra câmera: a música volta e a missão recomeça (a vigia fica no serviço) | `AlarmeService.kt` |
+| Fechar a tela não adianta | Home, arrastar o app ou apagar a tela com o alarme ativo: em 2 s a música volta e uma nova notificação em tela cheia reabre o alarme | `AlarmeActivity.kt`, `AlarmeService.kt` |
+| Desligar o celular não adianta | O alarme em andamento fica gravado até ser cumprido; quando o processo volta (celular ligado de novo, app reaberto), ele toca de novo em 2 s | `Ajustes.kt`, `App.kt` |
+| Sem botão de adiar | Só desliga cumprindo a missão | `AlarmeActivity.kt` |
 | Volume travado no máximo (opcional) | A cada 1 s, restaura o volume de alarme se alguém abaixar | `Sirene.kt` |
 | Pausa música e vídeo de outros apps | Foco de áudio `AUDIOFOCUS_GAIN_TRANSIENT` | `Sirene.kt` |
 | Notificação que não some | `setDeleteIntent` reexibe a notificação se o usuário arrastar (Android 14+) | `AlarmeService.kt` |
 | Botões de volume não calam | `onKeyDown` consome volume-baixo e mudo | `AlarmeActivity.kt` |
-| Soneca de 5 min | Gravada no alarme (`sonecaAte`), aparece na tela e sobrevive a reinício | `Agendador.kt`, `Cartoes.kt` |
-| Soneca automática | Sem desligar em 10 min, adia sozinho | `AlarmeService.kt` |
+| Pausa automática | Sem a missão cumprida em 10 min (ex.: ninguém em casa), pausa 5 min e volta. A pausa fica gravada no alarme (`sonecaAte`), aparece na tela e sobrevive a reinício | `AlarmeService.kt`, `Agendador.kt`, `Cartoes.kt` |
 | Sobrevive a reinício | Reagenda no boot, inclusive antes do 1º desbloqueio (direct boot) | `BootReceiver.kt`, `Alarmes.kt` |
 | Repetição por dia da semana | `dias` usa `DayOfWeek.value` (1 = seg … 7 = dom) | `Alarme.kt` |
 | Checklist de permissões | Mostra o que falta e pede no diálogo do sistema ou abre a tela certa das Configurações | `Poderes.kt`, `Cartoes.kt` |
@@ -92,7 +94,8 @@ Ciclo de vida de um disparo:
    - **Vigia:** 20 s sem sinal (a pessoa não olhou ou fechou a tela) religam a música e a notificação; `silenciado` volta a `false` e a tela, se estiver aberta, volta pro FALAR.
 
    Com `missao = false`, aparece só o botão DESLIGAR.
-6. Parar ou adiar encerra o serviço; a limpeza acontece em `onDestroy`.
+6. Enquanto o alarme dura, a `AlarmeActivity` avisa o serviço em `onStart`/`onStop` (`AlarmeService.tela`). Se a tela sumir por 2 s, o serviço religa a música e posta uma segunda notificação em tela cheia (`Notificacoes.ID_CHAMADA`), que reabre a tela, inclusive com o celular bloqueado.
+7. Missão cumprida (`parar`) ou pausa automática encerram o serviço e apagam `Ajustes.alarmeEmAndamento`; a limpeza acontece em `onDestroy`. Se o processo morrer antes disso, `App.onCreate` encontra o alarme em andamento e o religa com `Agendador.retomar`.
 
 ## Mapa dos arquivos
 
@@ -107,11 +110,11 @@ Código em `app/src/main/java/com/implacavel/alarme/`. Cada arquivo começa com 
 | `Agendador.kt` | AlarmManager: agendar, soneca, cancelar, reagendar tudo |
 | `AlarmeReceiver.kt` | Recebe o disparo, atualiza o alarme salvo e chama o serviço |
 | `BootReceiver.kt` | Reagenda depois de reiniciar, mudar relógio/fuso ou atualizar o app |
-| `AlarmeService.kt` | Serviço em primeiro plano: notificação, comandos (`tocar`, `parar`, `adiar`, `reexibir`, `silenciar`, `olhando`, `volume`), vigia da missão, soneca automática |
+| `AlarmeService.kt` | Serviço em primeiro plano: notificação, comandos (`tocar`, `parar`, `reexibir`, `tela`, `silenciar`, `olhando`, `volume`), vigia da missão, reabertura da tela, pausa automática |
 | `Sirene.kt` | Música em loop, vibração, foco de áudio, volume relativo e trava de volume |
 | `Notificacoes.kt` | Canal "Alarme tocando" (mudo de propósito; o som vem da `Sirene`) |
 | `Poderes.kt` | Permissões necessárias: checagem, diálogo do sistema ou tela das Configurações |
-| `AlarmeActivity.kt` | Tela do alarme: relógio, etapa da missão (ou DESLIGAR), adiar, brilho máximo na etapa da câmera |
+| `AlarmeActivity.kt` | Tela do alarme: relógio, etapa da missão (ou DESLIGAR), brilho máximo na etapa da câmera, aviso de tela aberta/fechada pro serviço |
 | `Missao.kt` | Etapas FALAR e OLHAR da missão, anel de progresso e textos de feedback |
 | `OuvinteStop.kt` | Reconhecimento de voz contínuo até ouvir "stop" |
 | `CameraOlhos.kt` | Câmera frontal (CameraX) + detecção de rosto (ML Kit) → `Leitura` a cada quadro |
@@ -140,6 +143,7 @@ Outros arquivos:
 - **Olhar = rosto de frente + dois olhos abertos.** Giro de até 20°, probabilidade de olho aberto do ML Kit acima de 60%. É detecção de rosto, **não** reconhecimento de quem é: qualquer rosto serve.
 - **Piscar não derruba o anel.** A leitura da câmera oscila quadro a quadro entre "olhando" e "olhos fechados". Por isso só conta como "parou de olhar" depois de `TOLERANCIA_PISCADA_MS` (0,6 s) sem nenhum quadro de olhos abertos.
 - **Girar o celular não reinicia a missão.** A `AlarmeActivity` declara `configChanges`, então câmera e microfone seguem rodando. Antes, girar recriava a tela e voltava pro "diga STOP" com a música já calada.
+- **Sem adiar, e fugir da tela não funciona.** Não há botão de adiar. Fechar a tela do alarme de qualquer jeito reabre ela em ~2 s: o serviço, vivo, posta uma notificação nova em tela cheia (`ID_CHAMADA`), que o Android abre por cima da tela de bloqueio. Desligar o celular só adia até ele ligar: `Ajustes.alarmeEmAndamento` sobrevive, e o `App` religa o alarme na próxima vez que o processo sobe (o `BootReceiver` garante isso no boot).
 - **A vigia da missão fica no serviço, não na tela.** Num teste, dizer "stop" e fechar a tela do alarme deixava a música calada até a soneca automática de 10 min: a regra dos 20 s morria junto com a tela. Agora a etapa vem de `AlarmeService.silenciado`, a tela só manda sinais de "olhando", e é o serviço (que continua vivo) quem religa a música.
 - **ML Kit com modelo embutido**, e não o baixado pelo Google Play Services: funciona offline e antes do primeiro desbloqueio. Custa ~8 MB por tipo de processador, por isso o APK só inclui ARM (`abiFilters`); o lint avisa da falta de x86 pra Chromebook, e isso é de propósito.
 - **ML Kit precisa de regra no R8.** O ML Kit cria partes de si mesmo por reflexão. No modo completo do R8 (padrão do AGP 9), os construtores delas sumiam e `FaceDetection.getClient` quebrava com `NullPointerException` ao abrir a câmera. `app/proguard-rules.pro` mantém `com.google.mlkit.**` e `com.google.android.gms.internal.mlkit_**` inteiros.
@@ -171,7 +175,8 @@ Outros arquivos:
 - Na Samsung, o app não pode estar em "Apps em suspensão" (a tela principal avisa).
 - Antes do primeiro desbloqueio depois de reiniciar, a música escolhida e o reconhecimento de voz podem não estar disponíveis: tocam os bipes e aparece o botão "PARAR A MÚSICA".
 - Com a tela desbloqueada e o app em segundo plano (botão Home), o Android corta o microfone; ao voltar pra tela do alarme, o reconhecimento pode ter caído pro botão.
-- Sonecas do botão "Testar agora" não são gravadas.
+- Pausas automáticas do botão "Testar agora" não são gravadas.
+- Com o celular desligado nada toca: o alarme volta quando ele liga.
 - **Fique de olho:** o Android 16 (Galaxy S24 FE) registra avisos "AudioHardening … would be muted" quando o alarme toca com o app em segundo plano. Hoje é só auditoria: o som toca normalmente, e isso foi conferido no `dumpsys audio`. Se uma versão futura passar a aplicar a regra, o candidato é trocar o tipo do `AlarmeService` de `specialUse` para `mediaPlayback`. Pra conferir, rode `adb shell dumpsys audio | grep -A5 "Hardening enforcement"` depois de um alarme tocar com a tela bloqueada.
 
 ## Versões

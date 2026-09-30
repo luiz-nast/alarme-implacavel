@@ -1,6 +1,7 @@
 package com.implacavel.alarme
 
 import android.app.Application
+import android.util.Log
 
 /** Tag dos logs do app. Pra acompanhar um alarme: `adb logcat -s Implacavel`. */
 const val TAG = "Implacavel"
@@ -15,5 +16,10 @@ class App : Application() {
         Alarmes.carregar(this)
         Ajustes.carregar(this)
         Notificacoes.criarCanal(this)
+        // O processo morreu com um alarme tocando (celular desligado, app encerrado): ele volta em instantes
+        Ajustes.alarmeEmAndamento?.let {
+            Log.i(TAG, "Alarme $it foi interrompido no meio: voltando a tocar")
+            Agendador.retomar(this, it)
+        }
     }
 }

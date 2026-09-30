@@ -40,6 +40,10 @@ object Agendador {
         Alarmes.buscar(id)?.takeIf { it.sonecaAte != null }?.let { Alarmes.salvar(it.copy(sonecaAte = null)) }
     }
 
+    /** Religa em instantes um alarme que foi interrompido no meio (usa o disparo de soneca). */
+    fun retomar(ctx: Context, id: Int) =
+        agendarEm(ctx, id, System.currentTimeMillis() + 2_000L, soneca = true)
+
     fun agendarTeste(ctx: Context, segundos: Int) =
         agendarEm(ctx, Alarme.ID_TESTE, System.currentTimeMillis() + segundos * 1_000L, soneca = false)
 
