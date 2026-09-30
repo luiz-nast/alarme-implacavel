@@ -91,8 +91,12 @@ private fun lerRosto(rostos: List<Face>): Leitura {
     return classificarRosto(rosto.headEulerAngleY, rosto.headEulerAngleX, rosto.leftEyeOpenProbability, rosto.rightEyeOpenProbability)
 }
 
+/**
+ * Modo preciso e rosto a partir de 10% da largura da imagem: no modo rápido, e com o mínimo de 20%,
+ * o rosto sumia a cada 1 ou 2 s com o celular a um braço de distância e o anel não enchia.
+ */
 private val OPCOES_ROSTO = FaceDetectorOptions.Builder()
-    .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+    .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
     .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_ALL) // liga a probabilidade de olho aberto
-    .setMinFaceSize(0.2f)
+    .setMinFaceSize(0.1f)
     .build()

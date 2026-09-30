@@ -3,27 +3,50 @@ package com.implacavel.alarme
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
 import android.util.Log
 
-/** Recebe o disparo agendado pelo [Agendador], atualiza o alarme salvo e põe o [AlarmeService] pra tocar. */
+/**
+ * Recebe os disparos do [Agendador]:
+ * - DISPARAR: atualiza o alarme salvo, grava a foto do alarme em andamento, arma a retomada e põe
+ *   o [AlarmeService] pra tocar;
+ * - RETOMAR: se há alarme em andamento (o app morreu no meio dele), põe ele pra tocar de novo.
+ */
 class AlarmeReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
-        if (intent.action != Agendador.ACAO_DISPARAR) return
-        val id = intent.getIntExtra(Agendador.EXTRA_ID, -1)
-        val soneca = intent.getBooleanExtra(Agendador.EXTRA_SONECA, false)
-        Log.i(TAG, "Disparo recebido: alarme $id, soneca=$soneca")
-        if (id != Alarme.ID_TESTE) {
-            val alarme = Alarmes.buscar(id) ?: return // foi excluído depois de agendado
-            when {
-                soneca -> Alarmes.salvar(alarme.copy(sonecaAte = null))
-                !alarme.ativo -> {
-                    Log.i(TAG, "Disparo ignorado: alarme $id foi desligado depois de agendado")
-                    return
-                }
-                alarme.dias.isEmpty() -> Alarmes.salvar(alarme.copy(ativo = false)) // toca uma vez só
-                else -> Agendador.agendar(ctx, alarme) // já deixa a próxima repetição agendada
+        when (intent.action) {
+            Agendador.ACAO_DISPARAR -> disparar(ctx, intent.getIntExtra(Agendador.EXTRA_ID, -1))
+            Agendador.ACAO_RETOMAR -> {
+                val em = Ajustes.emAndamento ?: return // missão já cumprida: retomada velha
+                Log.i(TAG, "Retomada: alarme ${em.alarme.id} estava em andamento")
+                AlarmeService.tocar(ctx)
             }
         }
-        AlarmeService.tocar(ctx, id)
+    }
+
+    private fun disparar(ctx: Context, id: Int) {
+        Log.i(TAG, "Disparo recebido: alarme $id")
+        val alarme = if (id == Alarme.ID_TESTE) Alarme.teste() else atualizarSalvo(ctx, id) ?: return
+        // Foto e rede de segurança antes do serviço: se o app cair daqui pra frente, o alarme volta.
+        // Se outro alarme já está em andamento, os dois viram um, com a exigência maior.
+        val volume = ctx.getSystemService(AudioManager::class.java).getStreamVolume(AudioManager.STREAM_ALARM)
+        Ajustes.emAndamento = Ajustes.emAndamento?.juntar(alarme)
+            ?: EmAndamento(alarme, System.currentTimeMillis(), Ajustes.musica.value?.uri, volume)
+        Agendador.agendarRetomada(ctx)
+        AlarmeService.tocar(ctx)
+    }
+
+    /** Alarme de uma vez só se desliga; repetido já agenda a próxima vez. Null se ele não deve tocar. */
+    private fun atualizarSalvo(ctx: Context, id: Int): Alarme? {
+        val alarme = Alarmes.buscar(id) ?: return null // excluído depois de agendado
+        when {
+            !alarme.ativo -> {
+                Log.i(TAG, "Disparo ignorado: alarme $id foi desligado depois de agendado")
+                return null
+            }
+            alarme.dias.isEmpty() -> Alarmes.salvar(alarme.copy(ativo = false))
+            else -> Agendador.agendar(ctx, alarme)
+        }
+        return alarme
     }
 }

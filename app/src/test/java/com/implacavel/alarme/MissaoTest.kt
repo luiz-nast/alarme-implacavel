@@ -37,24 +37,29 @@ class MissaoTest {
     fun rostoVirandoNaoConta() {
         assertEquals(Leitura.DE_LADO, classificarRosto(35f, 0f, 0.9f, 0.9f))
         assertEquals(Leitura.DE_LADO, classificarRosto(0f, -30f, 0.9f, 0.9f))
+        assertEquals(Leitura.OLHANDO, classificarRosto(22f, -22f, 0.9f, 0.9f)) // até 25° ainda conta
     }
 
     @Test
-    fun piscadaCurtaAindaContaComoOlhando() {
-        assertTrue(olhandoComTolerancia(agoraMs = 10_000, ultimaOlhadaMs = 9_500))
-        assertFalse(olhandoComTolerancia(agoraMs = 10_000, ultimaOlhadaMs = 9_300))
+    fun piscadaOuFalhaCurtaAindaContaComoOlhando() {
+        assertTrue(olhandoComTolerancia(agoraMs = 10_000, ultimaOlhadaMs = 9_300))
+        assertFalse(olhandoComTolerancia(agoraMs = 10_000, ultimaOlhadaMs = 8_000))
         assertFalse(olhandoComTolerancia(agoraMs = 10_000, ultimaOlhadaMs = 0)) // nunca olhou
     }
 
     @Test
-    fun anelEncheOlhandoEEsvaziaDuasVezesMaisRapido() {
+    fun anelSobeOlhandoParaSemRostoEDesceDeLado() {
         var progresso = 0f
-        repeat(50) { progresso = avancarOlhar(progresso, olhando = true, passoMs = 100) }
+        repeat(50) { progresso = avancarOlhar(progresso, Leitura.OLHANDO, passoMs = 100) }
         assertEquals(0.5f, progresso, 0.001f)
-        repeat(10) { progresso = avancarOlhar(progresso, olhando = false, passoMs = 100) }
-        assertEquals(0.3f, progresso, 0.001f)
-        assertEquals(0f, avancarOlhar(0f, olhando = false, passoMs = 100), 0f)
-        assertEquals(1f, avancarOlhar(0.999f, olhando = true, passoMs = 100), 0f)
+        // A câmera perdeu o rosto: o anel espera, não cai
+        repeat(30) { progresso = avancarOlhar(progresso, Leitura.SEM_ROSTO, passoMs = 100) }
+        assertEquals(0.5f, progresso, 0.001f)
+        // De lado ou de olhos fechados: desce na mesma velocidade em que sobe
+        repeat(10) { progresso = avancarOlhar(progresso, Leitura.DE_LADO, passoMs = 100) }
+        assertEquals(0.4f, progresso, 0.001f)
+        assertEquals(0f, avancarOlhar(0f, Leitura.OLHOS_FECHADOS, passoMs = 100), 0f)
+        assertEquals(1f, avancarOlhar(0.999f, Leitura.OLHANDO, passoMs = 100), 0f)
     }
 
     @Test

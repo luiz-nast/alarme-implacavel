@@ -53,7 +53,7 @@ fun EditorAlarme(
     var rotulo by remember { mutableStateOf(inicial.rotulo) }
     var dias by remember { mutableStateOf(inicial.dias) }
     var missao by remember { mutableStateOf(inicial.missao) }
-    var volumeMaximo by remember { mutableStateOf(inicial.volumeMaximo) }
+    var volumeForte by remember { mutableStateOf(inicial.volumeForte) }
 
     Dialog(onDismissRequest = onCancelar, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
@@ -87,7 +87,9 @@ fun EditorAlarme(
                 )
                 Spacer(Modifier.height(8.dp))
                 LinhaSwitch("Missão pra desligar", "Dizer STOP e olhar pra câmera de olhos abertos", missao) { missao = it }
-                LinhaSwitch("Volume máximo", "Ignora o volume atual do celular", volumeMaximo) { volumeMaximo = it }
+                LinhaSwitch("Volume forte", "Toca a 70% do volume. Desligado, no volume atual. Nos dois casos, não dá pra abaixar", volumeForte) {
+                    volumeForte = it
+                }
                 Spacer(Modifier.height(12.dp))
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     if (!novo) {
@@ -106,7 +108,7 @@ fun EditorAlarme(
                                 rotulo = rotulo.trim(),
                                 dias = dias,
                                 missao = missao,
-                                volumeMaximo = volumeMaximo,
+                                volumeForte = volumeForte,
                                 ativo = true,
                             )
                             onSalvar(alarme)

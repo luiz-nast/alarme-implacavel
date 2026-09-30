@@ -56,4 +56,6 @@ dependencies {
     implementation("androidx.camera:camera-view:1.6.2")
     implementation("com.google.mlkit:face-detection:16.1.7")
     testImplementation("junit:junit:4.13.2")
+    // org.json de verdade nos testes (o do android.jar dos testes só lança exceção)
+    testImplementation("org.json:json:20260814")
 }

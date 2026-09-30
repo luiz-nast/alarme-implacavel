@@ -128,7 +128,7 @@ private fun TelaPrincipal() {
             item {
                 OutlinedButton(
                     onClick = {
-                        Agendador.tocarDaqui(ctx, Alarme.ID_TESTE, 10_000)
+                        Agendador.agendarTeste(ctx, 10)
                         Toast.makeText(ctx, "Toca em 10 segundos. Bloqueie a tela pra ver o efeito completo.", Toast.LENGTH_LONG).show()
                     },
                     modifier = Modifier.fillMaxWidth(),
@@ -138,11 +138,7 @@ private fun TelaPrincipal() {
                 CartaoAlarme(
                     alarme = alarme,
                     agora = agora,
-                    onLigar = { ligado ->
-                        Agendador.cancelarSoneca(ctx, alarme.id)
-                        salvarEAgendar(ctx, alarme.copy(ativo = ligado, sonecaAte = null))
-                    },
-                    onCancelarSoneca = { Agendador.cancelarSoneca(ctx, alarme.id) },
+                    onLigar = { ligado -> salvarEAgendar(ctx, alarme.copy(ativo = ligado)) },
                     onClick = { editando = alarme },
                 )
             }

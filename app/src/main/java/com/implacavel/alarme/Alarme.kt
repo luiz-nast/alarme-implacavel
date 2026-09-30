@@ -2,19 +2,25 @@ package com.implacavel.alarme
 
 import org.json.JSONArray
 import org.json.JSONObject
-import java.time.Instant
 import java.time.ZonedDateTime
+import kotlin.math.roundToInt
+
+/** Volume forte: 70% do volume de alarme do celular. */
+const val VOLUME_FORTE = 0.7f
+
+/** O botão "Testar agora" toca a 50% do volume de alarme. */
+const val VOLUME_TESTE = 0.5f
 
 /**
- * Um alarme salvo pelo usuário, com as regras de quando ele toca. Sem dependência do Android
- * (fora a serialização JSON), por isso as regras são testadas em AlarmeTest.
+ * Um alarme salvo pelo usuário, com as regras de quando ele toca (e, no fim do arquivo, o
+ * [EmAndamento], o alarme que tocou e ainda não foi cumprido). Sem dependência do Android (fora a
+ * serialização JSON), por isso as regras são testadas em AlarmeTest.
  *
  * @property dias dias em que repete, no padrão DayOfWeek.value (1 = segunda … 7 = domingo).
  *   Vazio = toca uma vez e se desliga sozinho.
  * @property missao só desliga dizendo STOP e olhando pra câmera de olhos abertos (veja Missao.kt).
- * @property volumeMaximo trava o volume de alarme no máximo enquanto toca (veja Sirene).
- * @property sonecaAte quando o disparo avulso pendente toca (epoch em ms): pausa automática ou
- *   retomada de um alarme interrompido (veja [Agendador.tocarDaqui]); null se não há nenhum.
+ * @property volumeForte trava o volume de alarme em [VOLUME_FORTE] enquanto toca; sem isso, trava no
+ *   volume em que ele estava (veja [EmAndamento.volumeTravado]). Nos dois casos, não dá pra abaixar.
  */
 data class Alarme(
     val id: Int,
@@ -24,8 +30,7 @@ data class Alarme(
     val dias: Set<Int> = emptySet(),
     val ativo: Boolean = true,
     val missao: Boolean = true,
-    val volumeMaximo: Boolean = true,
-    val sonecaAte: Long? = null,
+    val volumeForte: Boolean = true,
 ) {
     val horario: String get() = hhmm(hora, minuto)
 
@@ -42,16 +47,6 @@ data class Alarme(
         return alvo
     }
 
-    /** Horário da soneca, se ela ainda não passou. */
-    fun sonecaPendente(agora: ZonedDateTime): ZonedDateTime? =
-        sonecaAte?.let { Instant.ofEpochMilli(it).atZone(agora.zone) }?.takeIf { it.isAfter(agora) }
-
-    /** Próxima vez que o alarme toca, contando a soneca; null se nada estiver agendado. */
-    fun proximoToque(agora: ZonedDateTime): ZonedDateTime? {
-        val normal = if (ativo) proximoDisparo(agora) else null
-        return listOfNotNull(sonecaPendente(agora), normal).minByOrNull { it.toEpochSecond() }
-    }
-
     fun paraJson(): JSONObject = JSONObject()
         .put("id", id)
         .put("hora", hora)
@@ -60,14 +55,13 @@ data class Alarme(
         .put("dias", JSONArray(dias.sorted()))
         .put("ativo", ativo)
         .put("missao", missao)
-        .put("volumeMaximo", volumeMaximo)
-        .apply { if (sonecaAte != null) put("sonecaAte", sonecaAte) }
+        .put("volumeForte", volumeForte)
 
     companion object {
         /** Id reservado pro botão "Testar agora". Os alarmes salvos começam em 1. */
         const val ID_TESTE = 0
 
-        fun teste() = Alarme(id = ID_TESTE, hora = 0, minuto = 0, rotulo = "Teste do Alarme Implacável", volumeMaximo = false)
+        fun teste() = Alarme(id = ID_TESTE, hora = 0, minuto = 0, rotulo = "Teste do Alarme Implacável", volumeForte = false)
 
         fun deJson(o: JSONObject): Alarme {
             val dias = o.optJSONArray("dias")
@@ -79,9 +73,44 @@ data class Alarme(
                 dias = if (dias == null) emptySet() else (0 until dias.length()).map { dias.getInt(it) }.toSet(),
                 ativo = o.optBoolean("ativo", true),
                 missao = o.optBoolean("missao", true),
-                volumeMaximo = o.optBoolean("volumeMaximo", true),
-                sonecaAte = if (o.has("sonecaAte")) o.getLong("sonecaAte") else null,
+                // "volumeMaximo" é o nome das versões anteriores
+                volumeForte = o.optBoolean("volumeForte", o.optBoolean("volumeMaximo", true)),
             )
         }
+    }
+}
+
+/**
+ * O alarme que tocou e ainda não foi cumprido, com tudo pra ele voltar igual se o app morrer: o
+ * [alarme] como estava, quando tocou ([desde], epoch em ms), a [musica] (URI) e o [volume] de
+ * alarme de antes (a Sirene o devolve no fim; veja [volumeTravado]).
+ * Editar o alarme, trocar a música ou abaixar o volume depois não muda nada.
+ */
+data class EmAndamento(val alarme: Alarme, val desde: Long, val musica: String?, val volume: Int) {
+    /** Outro alarme disparou no meio: este continua, com a exigência maior dos dois. */
+    fun juntar(outro: Alarme) = copy(
+        alarme = alarme.copy(missao = alarme.missao || outro.missao, volumeForte = alarme.volumeForte || outro.volumeForte),
+    )
+
+    /** Volume de alarme travado enquanto toca, numa escala até [maximo]: 50% no teste, 70% no volume forte, senão o de antes. */
+    fun volumeTravado(maximo: Int): Int = when {
+        alarme.id == Alarme.ID_TESTE -> (maximo * VOLUME_TESTE).roundToInt()
+        alarme.volumeForte -> (maximo * VOLUME_FORTE).roundToInt()
+        else -> volume
+    }
+
+    fun paraJson(): JSONObject = JSONObject()
+        .put("alarme", alarme.paraJson())
+        .put("desde", desde)
+        .put("volume", volume)
+        .apply { if (musica != null) put("musica", musica) }
+
+    companion object {
+        fun deJson(o: JSONObject) = EmAndamento(
+            alarme = Alarme.deJson(o.getJSONObject("alarme")),
+            desde = o.getLong("desde"),
+            musica = if (o.has("musica")) o.getString("musica") else null,
+            volume = o.getInt("volume"),
+        )
     }
 }

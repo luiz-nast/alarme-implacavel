@@ -1,12 +1,13 @@
 package com.implacavel.alarme
 
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.ZoneId
 import java.time.ZonedDateTime
 
-/** Regras de quando o alarme toca ([Alarme.proximoDisparo] e [Alarme.proximoToque]). */
+/** Regras de quando o alarme toca ([Alarme.proximoDisparo]), nome, JSON e o alarme em andamento ([EmAndamento]). */
 class AlarmeTest {
     private val zona = ZoneId.of("America/Sao_Paulo")
 
@@ -47,13 +48,48 @@ class AlarmeTest {
     }
 
     @Test
-    fun sonecaPendenteContaComoProximoToque() {
-        val agora = em(9, 29, 6, 45)
-        val daquiCinco = agora.plusMinutes(5)
-        val adiado = Alarme(1, 6, 45, ativo = false, sonecaAte = daquiCinco.toInstant().toEpochMilli())
-        assertEquals(daquiCinco, adiado.proximoToque(agora))
-        assertNull(adiado.copy(sonecaAte = null).proximoToque(agora))
-        // Soneca que já passou não conta; vale o próximo disparo normal
-        assertEquals(em(9, 30, 6, 45), adiado.copy(ativo = true).proximoToque(agora.plusMinutes(10)))
+    fun jsonIdaEVolta() {
+        // A foto do alarme em andamento (Ajustes.emAndamento) depende disto
+        val alarme = Alarme(3, 6, 45, rotulo = "Academia", dias = setOf(1, 3, 5), ativo = false, missao = false, volumeForte = false)
+        assertEquals(alarme, Alarme.deJson(alarme.paraJson()))
+        assertEquals(Alarme.teste(), Alarme.deJson(Alarme.teste().paraJson()))
+    }
+
+    @Test
+    fun fotoDoAlarmeEmAndamentoIdaEVolta() {
+        val em = EmAndamento(Alarme(3, 6, 45, rotulo = "Academia"), desde = 1_790_000_000_000, musica = "content://musica/1", volume = 7)
+        assertEquals(em, EmAndamento.deJson(em.paraJson()))
+        val semMusica = em.copy(musica = null)
+        assertEquals(semMusica, EmAndamento.deJson(semMusica.paraJson()))
+    }
+
+    @Test
+    fun doisAlarmesJuntosFicamComAExigenciaMaior() {
+        // Pré-alarme sem missão ainda tocando quando o alarme de verdade dispara
+        val preAlarme = EmAndamento(Alarme(1, 6, 55, missao = false, volumeForte = false), desde = 0, musica = null, volume = 5)
+        val junto = preAlarme.juntar(Alarme(2, 7, 0, missao = true, volumeForte = true))
+        assertTrue(junto.alarme.missao)
+        assertTrue(junto.alarme.volumeForte)
+        assertEquals(1, junto.alarme.id) // segue o mesmo alarme, com a música e o volume de antes
+        assertEquals(5, junto.volume)
+        // Juntar com um alarme mais fraco não afrouxa nada
+        assertEquals(junto, junto.juntar(Alarme(3, 7, 5, missao = false, volumeForte = false)))
+    }
+
+    @Test
+    fun volumeTravadoNoTesteNoForteENoNormal() {
+        val normal = EmAndamento(Alarme(1, 7, 0, volumeForte = false), desde = 0, musica = null, volume = 4)
+        assertEquals(4, normal.volumeTravado(maximo = 15)) // o volume de antes do alarme
+        assertEquals(11, normal.juntar(Alarme(2, 7, 0, volumeForte = true)).volumeTravado(maximo = 15)) // 70% de 15
+        assertEquals(8, EmAndamento(Alarme.teste(), desde = 0, musica = null, volume = 3).volumeTravado(maximo = 15)) // 50% de 15
+    }
+
+    @Test
+    fun jsonDeVersaoAntigaAindaLe() {
+        // Versões anteriores gravavam "sonecaAte", que agora é ignorado
+        val antigo = JSONObject(
+            """{"id":2,"hora":7,"minuto":0,"rotulo":"","dias":[],"ativo":true,"missao":true,"volumeMaximo":true,"sonecaAte":1790000000000}""",
+        )
+        assertEquals(Alarme(2, 7, 0), Alarme.deJson(antigo))
     }
 }

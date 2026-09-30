@@ -26,10 +26,10 @@ class App : Application() {
         Alarmes.carregar(this)
         Ajustes.carregar(this)
         Notificacoes.criarCanal(this)
-        // O processo morreu com um alarme tocando (celular desligado, app encerrado): ele volta em instantes
-        Ajustes.alarmeEmAndamento?.let {
-            Log.i(TAG, "Alarme $it foi interrompido no meio: voltando a tocar")
-            Agendador.tocarDaqui(this, it, 2_000)
+        // O processo morreu com um alarme tocando (celular desligado, app encerrado ou caído): ele volta em instantes
+        Ajustes.emAndamento?.let {
+            Log.i(TAG, "Alarme ${it.alarme.id} foi interrompido no meio: voltando a tocar")
+            Agendador.agendarRetomada(this, 2_000)
         }
     }
 }

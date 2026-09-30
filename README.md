@@ -1,6 +1,6 @@
 # Alarme Implacável
 
-App Android de despertador feito pra ser impossível de ignorar. Ele toma a tela mesmo com o celular bloqueado e toca a sua música em loop no volume de alarme, inclusive no modo silencioso. Pra desligar, é preciso cumprir uma missão: **dizer "STOP"** e depois **olhar pra câmera de olhos abertos** até completar um anel.
+App Android de despertador feito pra ser impossível de ignorar. Ele toma a tela mesmo com o celular bloqueado e toca a sua música em loop no volume de alarme, inclusive no modo silencioso. Pra desligar, é preciso cumprir uma missão: **dizer "STOP"** e depois **olhar pra câmera de olhos abertos** até completar um anel. Depois que tocou, não há outra saída: nem adiar, nem pausa, nem desligar o celular, nem o app cair.
 
 - **Linguagem:** Kotlin com Jetpack Compose (Material 3). Câmera com CameraX; rosto e olhos com ML Kit, no próprio aparelho.
 - **Testado em:** Galaxy S24 FE (SM-S721B), Android 16 / One UI 8.5.
@@ -15,17 +15,17 @@ App Android de despertador feito pra ser impossível de ignorar. Ele toma a tela
 | Música escolhida pelo usuário | Arquivo de áudio do celular (seletor do sistema + permissão persistente); sem escolha, toque de alarme | `Ajustes.kt`, `Sirene.kt` |
 | Toca no silencioso e passa pelo Não Perturbe | `MediaPlayer` e vibração com `USAGE_ALARM` | `Sirene.kt` |
 | Missão, etapa 1: dizer STOP | Reconhecedor de voz do sistema em loop; a música alterna 5 s alta e 4 s a 25% pra voz ser ouvida | `OuvinteStop.kt`, `Missao.kt` |
-| Missão, etapa 2: olhar pra câmera | Câmera frontal num círculo com anel de progresso: enche olhando de olhos abertos, esvazia 2× mais rápido sem olhar (piscadas de até 0,6 s não contam) | `CameraOlhos.kt`, `Missao.kt` |
+| Missão, etapa 2: olhar pra câmera | Câmera frontal num círculo com anel de progresso: enche olhando de olhos abertos; se a câmera perde o rosto, espera; de lado ou de olhos fechados, desce (piscadas e falhas de até 1,5 s não contam) | `CameraOlhos.kt`, `Missao.kt`, `RegrasMissao.kt` |
 | Feedback visual da câmera | Anel e texto verde (olhando), âmbar (de lado) ou vermelho (olhos fechados, sem rosto); tela clara no brilho máximo pra iluminar o rosto | `Missao.kt`, `AlarmeActivity.kt` |
 | Não dá pra enrolar | 20 s sem olhar pra câmera: a música volta e a missão recomeça (a vigia fica no serviço) | `AlarmeService.kt` |
 | Fechar a tela não adianta | Home, arrastar o app ou apagar a tela com o alarme ativo: em 1 s a música volta e uma nova notificação em tela cheia reabre o alarme (no Galaxy S24 FE, 1,3 a 3,6 s no total) | `AlarmeActivity.kt`, `AlarmeService.kt` |
+| O app cair não adianta | Enquanto toca, o serviço deixa no AlarmManager (que roda fora do app) uma retomada sempre 10 s à frente. Se o app cair, travar ou for encerrado, o Android religa o alarme sozinho | `AlarmeService.kt`, `Agendador.kt`, `App.kt` |
 | Desligar o celular não adianta | O alarme em andamento fica gravado até ser cumprido; quando o processo volta (celular ligado de novo, app reaberto), ele toca de novo em poucos segundos | `Ajustes.kt`, `App.kt` |
-| Sem botão de adiar | Só desliga cumprindo a missão | `AlarmeActivity.kt` |
-| Volume travado no máximo (opcional) | A cada 1 s, restaura o volume de alarme se alguém abaixar | `Sirene.kt` |
+| Sem saída | Sem adiar, pausa ou soneca. O alarme que tocou vira uma "foto" gravada, com a música e o volume: editar, desligar ou excluir o alarme, trocar a música ou abaixar o volume no meio não muda nada. Tirar a permissão da câmera mostra "LIBERAR CÂMERA", não "DESLIGAR". Dois alarmes ao mesmo tempo viram um, com a exigência maior | `AlarmeReceiver.kt`, `AlarmeService.kt`, `Alarme.kt`, `Missao.kt` |
+| Volume travado | Do disparo até a missão cumprida (inclusive com a música calada depois do STOP), a cada 1 s desfaz qualquer tentativa de abaixar o volume de alarme: 70% com "Volume forte", 50% no botão de teste, ou o volume de antes do alarme, que volta no fim | `Sirene.kt`, `Alarme.kt` |
 | Pausa música e vídeo de outros apps | Foco de áudio `AUDIOFOCUS_GAIN_TRANSIENT` | `Sirene.kt` |
 | Notificação que não some | `setDeleteIntent` reexibe a notificação se o usuário arrastar (Android 14+) | `AlarmeService.kt` |
 | Botões de volume não calam | `onKeyDown` consome volume-baixo e mudo | `AlarmeActivity.kt` |
-| Pausa automática | Sem a missão cumprida em 10 min (ex.: ninguém em casa), pausa 5 min e volta. A pausa fica gravada no alarme (`sonecaAte`, via `tocarDaqui(…, gravar = true)`), aparece na tela e sobrevive a reinício | `AlarmeService.kt`, `Agendador.kt`, `Cartoes.kt` |
 | Sobrevive a reinício | Reagenda no boot, inclusive antes do 1º desbloqueio (direct boot), e toda vez que o app é aberto (não ao girar a tela) | `BootReceiver.kt`, `MainActivity.kt`, `Alarmes.kt` |
 | Repetição por dia da semana | `dias` usa `DayOfWeek.value` (1 = seg … 7 = dom) | `Alarme.kt` |
 | Checklist de permissões | Mostra o que falta e pede no diálogo do sistema ou abre a tela certa das Configurações | `Poderes.kt`, `Cartoes.kt` |
@@ -65,8 +65,10 @@ flowchart LR
     Tela --> Falar["EtapaFalar + OuvinteStop"]
     Falar -->|disse stop: silenciar| Olhar["EtapaOlhar + CameraOlhos (ML Kit)"]
     Olhar -->|olhando: sinal a cada 1 s| Svc
-    Olhar -->|anel completo: parar| Svc
+    Olhar -->|anel completo: missaoCumprida| Svc
     Svc -->|20 s sem sinal: vigia religa a música| Falar
+    Svc -->|a cada 5 s: retomada 10 s à frente| Ag
+    Ag -->|app morreu: retomada| Rec
     Boot["BootReceiver"] -->|reinício, relógio, atualização| Ag
 ```
 
@@ -76,27 +78,27 @@ Estado compartilhado, sem ViewModel, injeção de dependência ou banco de dados
 - `Ajustes.musica` (`StateFlow<Musica?>`) é a música escolhida (URI + nome).
 - `AlarmeService.tocando` (`StateFlow<Alarme?>`) é o alarme ativo agora. A `AlarmeActivity` fecha sozinha quando vira `null`.
 - `AlarmeService.silenciado` (`StateFlow<Boolean>`) diz se a pessoa já disse "stop" (música calada). A tela deriva a etapa daqui: `false` = FALAR, `true` = OLHAR.
+- `Ajustes.emAndamento` (`EmAndamento?`, gravado em JSON) é a foto do alarme que tocou e ainda não foi cumprido: o alarme, quando tocou, a música e o volume de antes. Só `AlarmeService.concluir` apaga.
 
 Ciclo de vida de um disparo:
 
-1. `Agendador.agendar` cria um `PendingIntent` de broadcast. Cada alarme tem duas vagas: `id * 2` pro disparo normal e `id * 2 + 1` pra soneca, pra um não substituir o outro. A soneca é o disparo avulso de `Agendador.tocarDaqui`, usado pelo botão de teste, pela pausa automática (a única gravada em `sonecaAte`) e pela retomada de alarme interrompido.
+1. `Agendador.agendar` cria um `PendingIntent` de broadcast DISPARAR por alarme (código `id * 2`) e o agenda com `setAlarmClock`.
 2. `AlarmeReceiver` recebe e atualiza o alarme salvo:
-   - soneca: limpa `sonecaAte`;
-   - disparo normal de alarme desligado (agendamento velho): ignora;
+   - alarme desligado (agendamento velho): ignora;
    - alarme de uma vez só: `ativo = false`;
    - alarme repetido: agenda a próxima repetição.
 
-   Depois chama `AlarmeService.tocar`.
-3. `AlarmeService` vira serviço em primeiro plano (`specialUse`), mostra a notificação e liga a `Sirene`.
+   Depois grava a foto em `Ajustes.emAndamento` (se já havia uma, junta os dois com `EmAndamento.juntar`), arma a retomada e chama `AlarmeService.tocar`. Foto e retomada vêm antes do serviço: se o app cair daqui pra frente, o alarme volta.
+3. `AlarmeService` lê a foto, vira serviço em primeiro plano (`specialUse`), mostra a notificação, liga a `Sirene` com a música e o volume da foto e passa a empurrar a retomada pra frente a cada 5 s.
 4. Com a tela desligada ou bloqueada, o sistema abre a `AlarmeActivity`. Com o celular em uso, aparece a notificação (na Samsung, primeiro a borda iluminada, depois a tela cheia).
-5. Com `missao = true`, a tela faz a missão:
+5. Com `missao = true`, a tela faz a missão (logo depois de o celular reiniciar, antes do primeiro desbloqueio, vem antes a etapa **DESBLOQUEAR**: a voz do Google só roda depois do desbloqueio, então o botão abre o teclado do PIN por cima do alarme):
    - **FALAR:** a `EtapaFalar` alterna o volume da música via `AlarmeService.volume` e escuta com `OuvinteStop`. Ao ouvir "stop", chama `AlarmeService.silenciar`: a música para, `silenciado` vira `true` e a vigia do serviço começa a contar 20 s.
-   - **OLHAR:** a `EtapaOlhar` abre a `CameraOlhos` e enche o anel. Enquanto a pessoa olha, chama `AlarmeService.olhando` a cada segundo, e cada sinal empurra a vigia mais 20 s. Anel completo chama `AlarmeService.parar`.
+   - **OLHAR:** a `EtapaOlhar` abre a `CameraOlhos` e enche o anel. Enquanto a pessoa olha, chama `AlarmeService.olhando` a cada segundo, e cada sinal empurra a vigia mais 20 s. Anel completo chama `AlarmeService.missaoCumprida`.
    - **Vigia:** 20 s sem sinal (a pessoa não olhou ou fechou a tela) religam a música e a notificação; `silenciado` volta a `false` e a tela, se estiver aberta, volta pro FALAR.
 
-   Com `missao = false`, aparece só o botão DESLIGAR.
+   Com `missao = false`, aparece só o botão DESLIGAR (`AlarmeService.desligar`, que o serviço só aceita em alarme sem missão).
 6. Enquanto o alarme dura, a `AlarmeActivity` avisa o serviço em `onStart`/`onStop` (`AlarmeService.tela`). Se a tela sumir por 1 s, o serviço religa a música e posta uma segunda notificação em tela cheia (`Notificacoes.ID_CHAMADA`), que reabre a tela, inclusive com o celular bloqueado.
-7. Missão cumprida (`parar`) ou pausa automática encerram o serviço e apagam `Ajustes.alarmeEmAndamento`; a limpeza acontece em `onDestroy`. Se o processo morrer antes disso, `App.onCreate` encontra o alarme em andamento e o religa em poucos segundos com `Agendador.tocarDaqui` (o Android arredonda pra no mínimo uns 5 s).
+7. Missão cumprida (`missaoCumprida` ou `desligar` → `concluir`) é o único fim: devolve o volume de antes, apaga a foto e cancela a retomada; a limpeza acontece em `onDestroy`. Se o processo morrer antes (queda, trava, "Forçar parada", celular desligado), a retomada dispara, ou o `App.onCreate` arma uma nova quando o processo volta, e o `AlarmeReceiver` põe a foto pra tocar de novo.
 
 ## Mapa dos arquivos
 
@@ -105,19 +107,19 @@ Código em `app/src/main/java/com/implacavel/alarme/`. Cada arquivo começa com 
 | Arquivo | Responsabilidade |
 |---|---|
 | `App.kt` | Início do processo: carrega alarmes e ajustes, cria o canal de notificação e religa alarme interrompido. Também tem `TAG` (logs) e `prefsProtegidas` (armazenamento legível antes do 1º desbloqueio) |
-| `Alarme.kt` | Modelo e regras de quando toca (`proximoDisparo`, `proximoToque`, `sonecaPendente`), `nome` pra mostrar, mais o JSON |
+| `Alarme.kt` | Modelo e regra de quando toca (`proximoDisparo`), `nome` pra mostrar e o JSON; e `EmAndamento`, a foto do alarme tocando, com `juntar` (dois alarmes viram um) |
 | `Alarmes.kt` | Repositório: lista em memória + gravação no armazenamento protegido pelo dispositivo |
-| `Ajustes.kt` | Música do alarme escolhida pelo usuário e o alarme em andamento |
-| `Agendador.kt` | AlarmManager: `agendar` (próxima ocorrência), `tocarDaqui` (teste, pausa, retomada), cancelar, reagendar tudo |
-| `AlarmeReceiver.kt` | Recebe o disparo, atualiza o alarme salvo e chama o serviço |
+| `Ajustes.kt` | Música do alarme e a foto do alarme em andamento (`emAndamento`) |
+| `Agendador.kt` | AlarmManager: `agendar` (próxima ocorrência), `agendarTeste`, `agendarRetomada`/`cancelarRetomada` (rede de segurança do alarme em andamento), reagendar tudo |
+| `AlarmeReceiver.kt` | Recebe DISPARAR (atualiza o alarme salvo, grava a foto, arma a retomada e chama o serviço) e RETOMAR (põe o alarme em andamento pra tocar de novo) |
 | `BootReceiver.kt` | Reagenda depois de reiniciar, mudar relógio/fuso ou atualizar o app |
-| `AlarmeService.kt` | Serviço em primeiro plano: notificação, comandos (`tocar`, `parar`, `reexibir`, `tela`, `silenciar`, `olhando`, `volume`), vigia da missão, reabertura da tela, pausa automática |
-| `Sirene.kt` | Música em loop, vibração, foco de áudio, volume relativo e trava de volume |
+| `AlarmeService.kt` | Serviço em primeiro plano: notificação, comandos (`tocar`, `missaoCumprida`, `desligar`, `reexibir`, `tela`, `silenciar`, `olhando`, `volume`, `darTempo`), vigia da missão, reabertura da tela, renovação da retomada, válvula de defeito e `concluir`, o único fim do alarme |
+| `Sirene.kt` | Música em loop, vibração, foco de áudio, volume relativo e trava de volume do começo ao fim (`preparar`, `tocar`, `calar`, `desligar`) |
 | `Notificacoes.kt` | Canal "Alarme tocando" (mudo de propósito; o som vem da `Sirene`) |
 | `Poderes.kt` | `enum Poder`: cada permissão necessária sabe se está `liberado`, qual permissão de diálogo falta e abrir a tela certa das Configurações |
-| `AlarmeActivity.kt` | Tela do alarme: relógio, etapa da missão (ou DESLIGAR), brilho máximo na etapa da câmera, aviso de tela aberta/fechada pro serviço |
-| `Missao.kt` | Etapas FALAR e OLHAR da missão, anel de progresso e textos de feedback |
-| `OuvinteStop.kt` | Reconhecimento de voz contínuo até ouvir "stop" |
+| `AlarmeActivity.kt` | Tela do alarme: relógio, etapa da missão (ou DESLIGAR), brilho máximo na etapa da câmera, aviso de tela aberta/fechada pro serviço, e se o celular já foi desbloqueado desde que ligou |
+| `Missao.kt` | Etapas DESBLOQUEAR (só logo depois de reiniciar), FALAR e OLHAR, anel de progresso, textos de feedback e o pedido da câmera quando a permissão foi tirada (desbloqueio, diálogo ou Configurações com tempo de graça) |
+| `OuvinteStop.kt` | Reconhecimento de voz contínuo até ouvir "stop"; desiste (e a tela mostra o botão) depois de 5 erros seguidos ou 8 s sem sinal do reconhecedor |
 | `CameraOlhos.kt` | Câmera frontal (CameraX) + detecção de rosto (ML Kit) → `Leitura` a cada quadro |
 | `RegrasMissao.kt` | Regras puras da missão: `disseStop`, `classificarRosto`, `avancarOlhar`, tempos |
 | `MainActivity.kt` | Tela principal: estado, pedidos de permissão, seletor de música, lista. Reagenda tudo ao abrir |
@@ -131,7 +133,7 @@ Outros arquivos:
 - `app/src/main/AndroidManifest.xml`: permissões, `queries` do reconhecimento de voz e componentes. Os do caminho do alarme têm `directBootAware`.
 - `app/proguard-rules.pro`: mantém o ML Kit intacto na otimização do R8 (veja as decisões de projeto).
 - `app/src/main/res/raw/alarme_reserva.wav`: bipes usados se nem a música nem o toque do sistema puderem ser lidos (ex.: antes do primeiro desbloqueio).
-- `app/src/test/java/com/implacavel/alarme/`: `AlarmeTest` (horários), `FormatacaoTest` (textos) e `MissaoTest` (voz, rosto e anel).
+- `app/src/test/java/com/implacavel/alarme/`: `AlarmeTest` (horários, nome, JSON e alarme em andamento), `FormatacaoTest` (textos) e `MissaoTest` (voz, rosto e anel).
 - `instalar.sh`: compila, instala e abre no celular via `adb`.
 
 ## Decisões de projeto (leia antes de mudar)
@@ -141,15 +143,17 @@ Outros arquivos:
 - **O app não traz música.** A música do alarme é um arquivo que o usuário escolhe no celular, porque música comercial tem direitos autorais e o repositório é público.
 - **Voz e música no mesmo celular.** Com a música alta no alto-falante, o microfone ouve mais a música que a pessoa. Por isso a etapa FALAR alterna 5 s de música alta (pra acordar) com 4 s a 25% (janela de escuta, com o aviso "🎤 Fala agora!"). O reconhecedor escuta o tempo todo.
 - **"Stop" com sotaque.** `disseStop` aceita "stop", "estop", "istópi", "stopi" etc., em qualquer ponto da frase, sem acento. O reconhecedor usa o idioma do sistema e prefere o modo offline.
-- **Olhar = rosto de frente + dois olhos abertos.** Giro de até 20°, probabilidade de olho aberto do ML Kit acima de 60%. É detecção de rosto, **não** reconhecimento de quem é: qualquer rosto serve.
-- **Piscar não derruba o anel.** A leitura da câmera oscila quadro a quadro entre "olhando" e "olhos fechados". Por isso só conta como "parou de olhar" depois de `TOLERANCIA_PISCADA_MS` (0,6 s) sem nenhum quadro de olhos abertos.
+- **Olhar = rosto de frente + dois olhos abertos.** Giro de até 25°, probabilidade de olho aberto do ML Kit acima de 60%. É detecção de rosto, **não** reconhecimento de quem é: qualquer rosto serve. O ML Kit roda no modo preciso e acha rosto a partir de 10% da largura da imagem: no modo rápido, com mínimo de 20%, o rosto sumia a cada 1 ou 2 s com o celular a um braço de distância (16 de 19 quedas do anel num teste foram "sem rosto").
+- **Piscar ou falha da câmera não derrubam o anel.** A leitura oscila quadro a quadro. Por isso só conta como "parou de olhar" depois de `TOLERANCIA_MS` (1,5 s) sem nenhum quadro de olhos abertos, e sem rosto na imagem o anel só espera (`avancarOlhar`). Desce, na mesma velocidade em que sobe, só com o rosto de lado ou os olhos fechados.
 - **Girar o celular não reinicia a missão.** A `AlarmeActivity` declara `configChanges`, então câmera e microfone seguem rodando. Antes, girar recriava a tela e voltava pro "diga STOP" com a música já calada.
-- **Sem adiar, e fugir da tela não funciona.** Não há botão de adiar. Fechar a tela do alarme de qualquer jeito reabre ela em poucos segundos: o serviço, vivo, posta uma notificação nova em tela cheia (`ID_CHAMADA`), que o Android abre por cima da tela de bloqueio. Desligar o celular só adia até ele ligar: `Ajustes.alarmeEmAndamento` sobrevive, e o `App` religa o alarme na próxima vez que o processo sobe (o `BootReceiver` garante isso no boot).
-- **Desligar um alarme só cancela a vaga normal.** `Agendador.agendar` com `ativo = false` não mexe na soneca. Um alarme de uma vez só fica desligado assim que toca; antes, se o celular reiniciasse no meio dele, o `BootReceiver` reagendava tudo e cancelava junto a retomada, e o alarme não voltava. Pelo mesmo motivo, o `AlarmeReceiver` ignora disparo normal de alarme desligado: é agendamento velho.
-- **A vigia da missão fica no serviço, não na tela.** Num teste, dizer "stop" e fechar a tela do alarme deixava a música calada até a soneca automática de 10 min: a regra dos 20 s morria junto com a tela. Agora a etapa vem de `AlarmeService.silenciado`, a tela só manda sinais de "olhando", e é o serviço (que continua vivo) quem religa a música.
+- **Tocou, só sai cumprindo a missão.** Não há adiar, pausa nem soneca. O alarme que tocou vira uma foto em `Ajustes.emAndamento` (alarme, hora, música e volume de antes), que só `AlarmeService.concluir` apaga: editar, desligar ou excluir o alarme, trocar a música ou abaixar o volume no meio não muda nada. O DESLIGAR (`AlarmeService.desligar`) só vale pra alarme sem missão, então repetir o da notificação de outro alarme não adianta. Se outro alarme dispara no meio, os dois viram um, com a exigência maior (`EmAndamento.juntar`): um pré-alarme sem missão não engole o alarme com missão. Fechar a tela reabre ela em poucos segundos (o serviço posta uma notificação nova em tela cheia, `ID_CHAMADA`). Desligar o celular só adia até ele ligar.
+- **O alarme em andamento não depende do app estar vivo.** Enquanto toca, o serviço empurra a cada 5 s uma retomada no AlarmManager pra 10 s à frente (`Agendador.agendarRetomada`), e o AlarmManager roda fora do app. Se o app cair, for encerrado (falta de memória, permissão tirada) ou travar, a retomada dispara e o `AlarmeReceiver` põe a foto pra tocar. Uma segunda retomada, 90 s depois, cobre o app travado: a primeira chega com ele travado e se perde. Quando o processo volta, o `App` arma a retomada pra 2 s. O `AlarmeReceiver` ignora retomada sem alarme em andamento (missão recém-cumprida) e disparo de alarme desligado (agendamento velho).
+- **Defeito não pode prender ninguém.** Com o app caindo sem parar, o alarme nunca desligaria. O serviço conta as quedas pelo histórico de saídas do Android (`ApplicationExitInfo`: erro, erro nativo e travamento, Android 11+) desde que o alarme tocou. Numa queda só, o alarme volta com o desafio (o dono pediu). Na segunda, volta com o botão DESLIGAR. Preço: o Android para de religar em segundo plano um app que cai duas vezes em poucos minutos, então depois da segunda queda o alarme pode ficar mudo até o app ser aberto, e aí aparece com o DESLIGAR. Parar pelos "Apps ativos", tirar permissão, "Forçar parada" e falta de memória não são quedas, então não viram saída.
+- **Antes do primeiro desbloqueio, a missão espera o desbloqueio.** Logo depois de reiniciar, o serviço de voz do Google cai (`Unable to create service GoogleTTSRecognitionService`) e a música escolhida não pode ser lida (toca o toque de alarme do sistema). Num teste, o reconhecedor ficou mudo, sem erro, e a tela do alarme cobria o teclado do PIN: não dava pra desligar nem desbloquear. Agora a etapa DESBLOQUEAR chama `requestDismissKeyguard` e dá 60 s sem a tela do alarme voltar (`darTempo`); e o `OuvinteStop` desiste depois de 8 s sem nenhum sinal do reconhecedor.
+- **A vigia da missão fica no serviço, não na tela.** Num teste, dizer "stop" e fechar a tela do alarme deixava a música calada: a regra dos 20 s morria junto com a tela. Agora a etapa vem de `AlarmeService.silenciado`, a tela só manda sinais de "olhando", e é o serviço (que continua vivo) quem religa a música.
 - **ML Kit com modelo embutido**, e não o baixado pelo Google Play Services: funciona offline e antes do primeiro desbloqueio. Custa ~8 MB por tipo de processador, por isso o APK só inclui ARM (`abiFilters`); o lint avisa da falta de x86 pra Chromebook, e isso é de propósito.
 - **ML Kit precisa de regra no R8.** O ML Kit cria partes de si mesmo por reflexão. No modo completo do R8 (padrão do AGP 9), os construtores delas sumiam e `FaceDetection.getClient` quebrava com `NullPointerException` ao abrir a câmera. `app/proguard-rules.pro` mantém `com.google.mlkit.**` e `com.google.android.gms.internal.mlkit_**` inteiros.
-- **Sempre há saída.** Sem microfone ou reconhecimento de voz, a etapa FALAR mostra "PARAR A MÚSICA". Sem câmera, a etapa OLHAR mostra "DESLIGAR". Um alarme que não desliga nunca seria pior.
+- **Saída só pra defeito, nunca pra truque.** Sem reconhecimento de voz, "PARAR A MÚSICA" só pula a fala: a câmera continua obrigatória. Sem permissão da câmera, aparece "LIBERAR CÂMERA", porque tirar a permissão é escolha: com o celular bloqueado ele pede o desbloqueio, depois o diálogo do sistema; negada de vez, abre as Configurações numa tarefa separada e a tela do alarme espera 60 s pra voltar (`AlarmeService.darTempo`; a música volta pela vigia). Câmera que não abre com a permissão dada (defeito) mostra "DESLIGAR", e o app que já caiu no alarme também.
 - **Serviço de primeiro plano `specialUse`.** Mantém o processo vivo enquanto o alarme dura. Microfone e câmera são usados pela Activity visível, não pelo serviço.
 - **Armazenamento protegido pelo dispositivo + `directBootAware`.** O alarme toca mesmo se o celular reiniciou e ninguém desbloqueou.
 - **Canal com `IMPORTANCE_HIGH` e categoria `ALARM`.** Necessário pra tela cheia e pra passar pelo Não Perturbe quando alarmes estão permitidos (o padrão).
@@ -172,12 +176,14 @@ Outros arquivos:
 
 ## Limitações conhecidas
 
-- "Forçar parada" nas Configurações faz o Android cancelar os alarmes até o app ser aberto de novo (ao abrir, a `MainActivity` reagenda tudo).
+- "Forçar parada", limpar os dados ou desinstalar o app são saídas que o Android não deixa um app bloquear. Depois de um "Forçar parada", o alarme em andamento volta assim que o app for aberto (a foto continua gravada), e a `MainActivity` reagenda os outros.
+- Sem pausa automática: se ninguém cumprir a missão (ex.: ninguém em casa), o alarme toca até a bateria acabar.
+- A câmera aceita qualquer rosto de olhos abertos, inclusive uma foto. Pra fechar isso, o próximo passo seria exigir piscadas (foto não pisca).
+- Ferramentas do sistema que calam tudo passam por cima do app: Não Perturbe configurado pra bloquear alarmes e "Silenciar todos os sons" da acessibilidade.
 - Se o Não Perturbe estiver configurado pra bloquear alarmes, o som não passa (o app não pede acesso ao Não Perturbe).
 - Na Samsung, o app não pode estar em "Apps em suspensão" (a tela principal avisa).
-- Antes do primeiro desbloqueio depois de reiniciar, a música escolhida e o reconhecimento de voz podem não estar disponíveis: tocam os bipes e aparece o botão "PARAR A MÚSICA".
+- Antes do primeiro desbloqueio depois de reiniciar, a música escolhida não pode ser lida (toca o toque de alarme do sistema, ou os bipes do app) e a missão pede o desbloqueio primeiro.
 - Com a tela desbloqueada e o app em segundo plano (botão Home), o Android corta o microfone; ao voltar pra tela do alarme, o reconhecimento pode ter caído pro botão.
-- Pausas automáticas do botão "Testar agora" não são gravadas.
 - Com o celular desligado nada toca: o alarme volta quando ele liga.
 - **Fique de olho:** o Android 16 (Galaxy S24 FE) registra avisos "AudioHardening … would be muted" quando o alarme toca com o app em segundo plano. Hoje é só auditoria: o som toca normalmente, e isso foi conferido no `dumpsys audio`. Se uma versão futura passar a aplicar a regra, o candidato é trocar o tipo do `AlarmeService` de `specialUse` para `mediaPlayback`. Pra conferir, rode `adb shell dumpsys audio | grep -A5 "Hardening enforcement"` depois de um alarme tocar com a tela bloqueada.
 
@@ -200,7 +206,6 @@ Outros arquivos:
 - **Nova etapa ou nova missão:** regra pura em `RegrasMissao.kt` com teste em `MissaoTest`, tela em `Missao.kt` e a escolha da etapa no `when` de `TelaAlarme` (`AlarmeActivity.kt`). O estado da etapa fica no serviço (como `AlarmeService.silenciado`), pra sobreviver à tela fechar.
 - **Novo comando pro serviço:** constante `ACAO_…`, função no companion do `AlarmeService` e ramo no `when` do `onStartCommand`.
 - **Nova permissão:** entrada no `enum Poder` com a checagem em `liberado` e a tela em `telaParaLiberar`. O cartão de permissões mostra sozinho.
-- **Novo disparo avulso** (ex.: soneca de verdade, lembrete): `Agendador.tocarDaqui(ctx, id, ms)`; com `gravar = true` ele aparece no cartão do alarme e sobrevive a reinício.
 
 ## Convenções pra quem for mexer (pessoa ou IA)
 
@@ -209,4 +214,5 @@ Outros arquivos:
 - Tempos e limiares da missão ficam nas constantes do topo de `RegrasMissao.kt` e `Missao.kt`.
 - Antes de subir mudança: `./gradlew assembleRelease lintDebug testDebugUnitTest`, com 0 erros de lint.
 - `Alarme.ID_TESTE = 0` é reservado pro botão "Testar agora"; alarmes salvos começam em 1.
+- Regra de ouro: só `AlarmeService.concluir` (missão cumprida ou DESLIGAR) apaga `Ajustes.emAndamento` e cancela a retomada. Nada mais (tela, receiver, edição ou exclusão de alarme) pode encerrar um alarme em andamento.
 - Imports explícitos, sem curinga.

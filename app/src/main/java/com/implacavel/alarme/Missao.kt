@@ -2,9 +2,16 @@
 // 1) FALAR: dizer "stop" (a música para); 2) OLHAR: olhar pra câmera de olhos abertos até fechar o anel.
 // Enquanto a pessoa olha, a etapa 2 avisa o AlarmeService a cada segundo; sem aviso por DESISTENCIA_MS
 // (não olhou, ou fechou a tela), a vigia do serviço religa a música e a missão volta pra etapa 1.
+// Logo depois de o celular reiniciar, antes do primeiro desbloqueio, vem antes a etapa DESBLOQUEAR.
 package com.implacavel.alarme
 
+import android.Manifest
+import android.app.Activity
+import android.app.KeyguardManager
 import android.util.Log
+import androidx.activity.compose.LocalActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
@@ -37,6 +44,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import kotlinx.coroutines.delay
 
 /** Na etapa de falar a música alterna: alta pra acordar, baixa pra voz se destacar no microfone. */
@@ -49,7 +57,35 @@ private const val PASSO_MS = 100L
 /** De quanto em quanto tempo a etapa da câmera avisa o serviço que a pessoa está olhando. */
 private const val AVISO_OLHANDO_MS = 1_000L
 
-/** Etapa 1: ouvir "stop". Sem reconhecimento de voz disponível, aparece um botão no lugar. */
+/**
+ * Etapa 0, só logo depois de o celular reiniciar: antes do primeiro desbloqueio o reconhecimento de
+ * voz do Google não roda (o serviço dele cai), então a missão espera o desbloqueio. O botão abre o
+ * teclado do PIN por cima do alarme, com um tempo sem a tela do alarme voltar; a música continua.
+ */
+@Composable
+fun EtapaDesbloquear() {
+    val ctx = LocalContext.current
+    val activity = LocalActivity.current
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            "Desbloqueie o celular\npra fazer a missão",
+            color = Color.White,
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(16.dp))
+        BotaoGrande("DESBLOQUEAR", {
+            AlarmeService.darTempo(ctx)
+            desbloquear(activity) {}
+        })
+    }
+}
+
+/**
+ * Etapa 1: ouvir "stop". Sem reconhecimento de voz disponível, aparece um botão no lugar; ele só
+ * cala a música e passa pra etapa da câmera, que continua obrigatória.
+ */
 @Composable
 fun EtapaFalar(onStop: () -> Unit) {
     val ctx = LocalContext.current
@@ -105,9 +141,19 @@ fun EtapaFalar(onStop: () -> Unit) {
 @Composable
 fun EtapaOlhar(onOlhando: () -> Unit, onConcluiu: () -> Unit) {
     val ctx = LocalContext.current
+    // Tirar a permissão da câmera não é saída: sem ela, o único caminho é liberar de novo
+    var liberada by remember { mutableStateOf(Poder.CAMERA.liberado(ctx)) }
+    LifecycleResumeEffect(Unit) {
+        liberada = Poder.CAMERA.liberado(ctx)
+        onPauseOrDispose { }
+    }
+    if (!liberada) {
+        PedirCamera(onResposta = { liberada = it })
+        return
+    }
     var leitura by remember { mutableStateOf(Leitura.SEM_ROSTO) }
-    if (!Poder.CAMERA.liberado(ctx) || leitura == Leitura.SEM_CAMERA) {
-        // Sem câmera não dá pra conferir os olhos: desliga no botão
+    if (leitura == Leitura.SEM_CAMERA) {
+        // A câmera deu defeito (a permissão existe): sem como conferir os olhos, desliga no botão
         BotaoGrande("DESLIGAR", onConcluiu, fundoClaro = true)
         return
     }
@@ -115,7 +161,7 @@ fun EtapaOlhar(onOlhando: () -> Unit, onConcluiu: () -> Unit) {
     val concluir by rememberUpdatedState(onConcluiu)
     var progresso by remember { mutableFloatStateOf(0f) }
     var ultimaOlhada by remember { mutableLongStateOf(0L) } // último quadro com olhos abertos
-    var olhando by remember { mutableStateOf(false) } // já com a tolerância a piscadas
+    var olhando by remember { mutableStateOf(false) } // já com a tolerância a piscadas e falhas da câmera
     LaunchedEffect(Unit) {
         var ultimoAviso = 0L
         while (true) {
@@ -130,7 +176,7 @@ fun EtapaOlhar(onOlhando: () -> Unit, onConcluiu: () -> Unit) {
                 avisarOlhando()
                 ultimoAviso = agora
             }
-            progresso = avancarOlhar(progresso, olhando, PASSO_MS)
+            progresso = avancarOlhar(progresso, if (olhando) Leitura.OLHANDO else leitura, PASSO_MS)
             if (progresso >= 1f) {
                 Log.i(TAG, "Missão: anel completo, alarme desligado")
                 concluir()
@@ -154,6 +200,47 @@ fun EtapaOlhar(onOlhando: () -> Unit, onConcluiu: () -> Unit) {
         Text(mensagem, color = cor, fontSize = 24.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
         Text("Mais ${segundosRestantes(progresso)} s de olhos abertos", color = VinhoAlarme, fontSize = 16.sp)
     }
+}
+
+/**
+ * Câmera sem permissão: desbloqueia o celular, se preciso, e pede no diálogo do sistema. Se o
+ * Android não mostrar mais o diálogo (negado de vez), abre as Configurações, com um tempo sem a tela
+ * do alarme voltar por cima (a música continua).
+ */
+@Composable
+private fun PedirCamera(onResposta: (Boolean) -> Unit) {
+    val ctx = LocalContext.current
+    val activity = LocalActivity.current
+    val pedir = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        if (!ok) {
+            AlarmeService.darTempo(ctx)
+            Poder.CAMERA.abrirConfiguracao(ctx)
+        }
+        onResposta(ok)
+    }
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            "A câmera está sem permissão.\nLibere pra desligar o alarme.",
+            color = VinhoAlarme,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(16.dp))
+        BotaoGrande("LIBERAR CÂMERA", { desbloquear(activity) { pedir.launch(Manifest.permission.CAMERA) } }, fundoClaro = true)
+    }
+}
+
+/** Com o celular bloqueado, pede o desbloqueio (PIN, digital) antes de [depois]; a tela do alarme continua por cima. */
+private fun desbloquear(activity: Activity?, depois: () -> Unit) {
+    val bloqueio = activity?.getSystemService(KeyguardManager::class.java)
+    if (activity == null || bloqueio?.isKeyguardLocked != true) return depois()
+    bloqueio.requestDismissKeyguard(
+        activity,
+        object : KeyguardManager.KeyguardDismissCallback() {
+            override fun onDismissSucceeded() = depois()
+        },
+    )
 }
 
 /** Trilha fraca do anel inteiro + arco forte com o progresso, começando no topo. */

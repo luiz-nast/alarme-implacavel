@@ -13,7 +13,8 @@ import android.util.Log
 /**
  * Escuta o microfone sem parar até ouvir "stop" (regra em [disseStop]). Usa o reconhecedor de voz do
  * sistema (no Galaxy, o do Google), de preferência offline, e recomeça sozinho depois de cada frase,
- * silêncio ou erro passageiro. Depois de [LIMITE_FALHAS] erros seguidos, avisa [onIndisponivel].
+ * silêncio ou erro passageiro. Depois de [LIMITE_FALHAS] erros seguidos, ou se o reconhecedor ficar
+ * [ESPERA_RESPOSTA_MS] sem dar sinal de vida (o serviço do Google caiu), avisa [onIndisponivel].
  * Tudo roda na thread principal.
  */
 class OuvinteStop(
@@ -25,6 +26,13 @@ class OuvinteStop(
     private val handler = Handler(Looper.getMainLooper())
     private var reconhecedor: SpeechRecognizer? = null
     private var falhasSeguidas = 0
+
+    /** O reconhecedor parou de responder: vale como indisponível, pra aparecer o botão no lugar. */
+    private val travou = Runnable {
+        Log.w(TAG, "Voz: o reconhecedor não responde há ${ESPERA_RESPOSTA_MS / 1000} s")
+        parar()
+        onIndisponivel()
+    }
 
     fun comecar() {
         val microfone = Poder.MICROFONE.liberado(ctx)
@@ -52,6 +60,13 @@ class OuvinteStop(
             .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
             .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
         reconhecedor?.startListening(pedido)
+        aguardarResposta()
+    }
+
+    /** Qualquer sinal do reconhecedor mostra que ele está vivo: o prazo de [travou] recomeça. */
+    private fun aguardarResposta() {
+        handler.removeCallbacks(travou)
+        handler.postDelayed(travou, ESPERA_RESPOSTA_MS)
     }
 
     private fun escutarDeNovo(esperaMs: Long) {
@@ -59,6 +74,7 @@ class OuvinteStop(
     }
 
     private fun conferir(resultado: Bundle?) {
+        aguardarResposta()
         val frases = resultado?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
         frases.firstOrNull()?.let(onOuviu)
         if (frases.isNotEmpty()) Log.i(TAG, "Voz ouviu: $frases")
@@ -79,6 +95,7 @@ class OuvinteStop(
 
     override fun onError(error: Int) {
         if (reconhecedor == null) return
+        aguardarResposta()
         when (error) {
             // Silêncio ou fala que não virou texto: normal, só escutar de novo
             SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> falhasSeguidas = 0
@@ -95,14 +112,15 @@ class OuvinteStop(
         escutarDeNovo(if (falhasSeguidas == 0) 100 else 800)
     }
 
-    override fun onReadyForSpeech(params: Bundle?) = Unit
-    override fun onBeginningOfSpeech() = Unit
-    override fun onRmsChanged(rmsdB: Float) = Unit
-    override fun onBufferReceived(buffer: ByteArray?) = Unit
-    override fun onEndOfSpeech() = Unit
-    override fun onEvent(eventType: Int, params: Bundle?) = Unit
+    override fun onReadyForSpeech(params: Bundle?) = aguardarResposta()
+    override fun onBeginningOfSpeech() = aguardarResposta()
+    override fun onRmsChanged(rmsdB: Float) = aguardarResposta()
+    override fun onBufferReceived(buffer: ByteArray?) = aguardarResposta()
+    override fun onEndOfSpeech() = aguardarResposta()
+    override fun onEvent(eventType: Int, params: Bundle?) = aguardarResposta()
 
     private companion object {
         const val LIMITE_FALHAS = 5
+        const val ESPERA_RESPOSTA_MS = 8_000L
     }
 }

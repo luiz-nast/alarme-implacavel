@@ -27,7 +27,7 @@ import java.time.ZonedDateTime
 
 @Composable
 fun Cabecalho(alarmes: List<Alarme>, agora: ZonedDateTime) {
-    val proximo = alarmes.mapNotNull { it.proximoToque(agora) }.minByOrNull { it.toEpochSecond() }
+    val proximo = alarmes.filter { it.ativo }.map { it.proximoDisparo(agora) }.minByOrNull { it.toEpochSecond() }
     Column(Modifier.padding(top = 16.dp, bottom = 4.dp)) {
         Text("Alarme Implacável", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
         Text(
@@ -114,13 +114,7 @@ fun CartaoMusica(nome: String?, onEscolher: () -> Unit, onTirar: () -> Unit) {
 }
 
 @Composable
-fun CartaoAlarme(
-    alarme: Alarme,
-    agora: ZonedDateTime,
-    onLigar: (Boolean) -> Unit,
-    onCancelarSoneca: () -> Unit,
-    onClick: () -> Unit,
-) {
+fun CartaoAlarme(alarme: Alarme, agora: ZonedDateTime, onLigar: (Boolean) -> Unit, onClick: () -> Unit) {
     val corHorario = if (alarme.ativo) Color.Unspecified else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
     Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(horizontal = 20.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -132,7 +126,7 @@ fun CartaoAlarme(
                 )
                 val extras = listOfNotNull(
                     "missão: STOP + câmera".takeIf { alarme.missao },
-                    "volume máximo".takeIf { alarme.volumeMaximo },
+                    "volume forte".takeIf { alarme.volumeForte },
                 )
                 if (extras.isNotEmpty()) {
                     Text(extras.joinToString(" · "), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
@@ -143,17 +137,6 @@ fun CartaoAlarme(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                }
-                alarme.sonecaPendente(agora)?.let { soneca ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            "Soneca até ${hhmm(soneca.toLocalTime())}",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                        TextButton(onClick = onCancelarSoneca) { Text("Cancelar soneca") }
-                    }
                 }
             }
             Switch(checked = alarme.ativo, onCheckedChange = onLigar)

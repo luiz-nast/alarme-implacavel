@@ -50,10 +50,14 @@ enum class Poder(val titulo: String, val explicacao: String, val permissao: Stri
     fun permissaoFaltando(ctx: Context): String? =
         permissao?.takeUnless { ContextCompat.checkSelfPermission(ctx, it) == PackageManager.PERMISSION_GRANTED }
 
-    /** Abre a tela das Configurações onde este poder é liberado; se o celular não tiver essa tela, a do app. */
+    /**
+     * Abre a tela das Configurações onde este poder é liberado; se o celular não tiver essa tela, a do
+     * app. Numa tarefa separada: assim a tela do alarme, ao voltar, não fecha as Configurações junto.
+     */
     fun abrirConfiguracao(ctx: Context) {
-        runCatching { ctx.startActivity(telaParaLiberar(ctx)) }
-            .onFailure { ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pacote(ctx))) }
+        val novaTarefa = Intent.FLAG_ACTIVITY_NEW_TASK
+        runCatching { ctx.startActivity(telaParaLiberar(ctx).addFlags(novaTarefa)) }
+            .onFailure { ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pacote(ctx)).addFlags(novaTarefa)) }
     }
 
     @SuppressLint("BatteryLife", "InlinedApi")

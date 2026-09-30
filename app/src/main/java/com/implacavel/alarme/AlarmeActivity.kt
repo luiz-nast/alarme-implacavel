@@ -2,6 +2,7 @@ package com.implacavel.alarme
 
 import android.os.Build
 import android.os.Bundle
+import android.os.UserManager
 import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -37,6 +38,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
@@ -49,6 +53,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.delay
 
 /**
  * Tela do alarme tocando. Aberta pela notificação em tela cheia do [AlarmeService]; aparece por
@@ -102,6 +107,7 @@ private fun TelaAlarme(alarme: Alarme) {
     // A etapa vem do serviço (música calada = já disse STOP, falta a câmera). Assim ela sobrevive à
     // tela ser fechada ou recriada, e a vigia do serviço, ao religar a música, volta pra etapa de falar.
     val silenciado by AlarmeService.silenciado.collectAsStateWithLifecycle()
+    val desbloqueado = celularDesbloqueado()
     val agora = agoraACada(1_000)
 
     // Na etapa da câmera a tela fica clara e no brilho máximo, pra iluminar o rosto no escuro
@@ -143,11 +149,13 @@ private fun TelaAlarme(alarme: Alarme) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Spacer(Modifier.height(16.dp))
                 when {
-                    !alarme.missao -> BotaoGrande("DESLIGAR", { AlarmeService.parar(ctx) })
+                    !alarme.missao -> BotaoGrande("DESLIGAR", { AlarmeService.desligar(ctx) })
+                    // Logo depois de o celular reiniciar, a voz do Google só roda depois do primeiro desbloqueio
+                    !desbloqueado -> EtapaDesbloquear()
                     !silenciado -> EtapaFalar(onStop = { AlarmeService.silenciar(ctx) })
                     else -> EtapaOlhar(
                         onOlhando = { AlarmeService.olhando(ctx) },
-                        onConcluiu = { AlarmeService.parar(ctx) },
+                        onConcluiu = { AlarmeService.missaoCumprida(ctx) },
                     )
                 }
                 Spacer(Modifier.height(24.dp))
@@ -166,6 +174,20 @@ fun BotaoGrande(texto: String, onClick: () -> Unit, fundoClaro: Boolean = false)
         shape = RoundedCornerShape(24.dp),
         colors = ButtonDefaults.buttonColors(containerColor = fundo, contentColor = letra),
     ) { Text(texto, fontSize = 24.sp, fontWeight = FontWeight.Black) }
+}
+
+/** Se o celular já foi desbloqueado desde que ligou. Enquanto não foi, confere de novo a cada segundo. */
+@Composable
+private fun celularDesbloqueado(): Boolean {
+    val usuario = LocalContext.current.getSystemService(UserManager::class.java)
+    var desbloqueado by remember { mutableStateOf(usuario.isUserUnlocked) }
+    LaunchedEffect(desbloqueado) {
+        while (!desbloqueado) {
+            delay(1_000)
+            desbloqueado = usuario.isUserUnlocked
+        }
+    }
+    return desbloqueado
 }
 
 /** Força o brilho máximo da tela enquanto [ligado]; ao sair, devolve o brilho do sistema. */

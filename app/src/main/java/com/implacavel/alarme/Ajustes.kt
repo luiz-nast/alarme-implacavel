@@ -10,6 +10,7 @@ import androidx.core.net.toUri
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import org.json.JSONObject
 
 /**
  * Ajustes e estado que precisam sobreviver ao processo: a música do alarme (um arquivo de áudio
@@ -24,12 +25,15 @@ object Ajustes {
     val musica: StateFlow<Musica?> = _musica.asStateFlow()
 
     /**
-     * Alarme tocando que ainda não foi cumprido. Se o processo morrer no meio (celular desligado,
-     * app encerrado), o [App] vê isto ao voltar e religa o alarme.
+     * O alarme que tocou e ainda não foi cumprido. Só [AlarmeService] apaga, quando a missão é
+     * cumprida. Se o processo morrer no meio (celular desligado, app encerrado ou caído), o [App]
+     * vê isto ao voltar e religa o alarme. Gravação ilegível conta como nenhum, pra não derrubar o app.
      */
-    var alarmeEmAndamento: Int?
-        get() = prefs.getInt("emAndamento", -1).takeIf { it >= 0 }
-        set(id) = prefs.edit(commit = true) { if (id == null) remove("emAndamento") else putInt("emAndamento", id) }
+    var emAndamento: EmAndamento?
+        get() = runCatching { prefs.getString("alarmeEmAndamento", null)?.let { EmAndamento.deJson(JSONObject(it)) } }.getOrNull()
+        set(valor) = prefs.edit(commit = true) {
+            if (valor == null) remove("alarmeEmAndamento") else putString("alarmeEmAndamento", valor.paraJson().toString())
+        }
 
     /** Chamado uma vez em [App.onCreate]. */
     fun carregar(ctx: Context) {
