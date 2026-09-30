@@ -25,8 +25,10 @@ import java.time.LocalTime
  * Serviço em primeiro plano que mantém o alarme ativo até o usuário desligar ou adiar.
  * Controla a [Sirene] e mostra a notificação que abre a [AlarmeActivity] em tela cheia.
  *
- * Recebe comandos pela action do Intent: tocar, parar, adiar e reexibir, mais silenciar, retomar e
- * volume, usados pela missão (a música para no "stop", mas o alarme só acaba depois da câmera).
+ * Recebe comandos pela action do Intent: tocar, parar, adiar e reexibir, mais silenciar, olhando e
+ * volume, usados pela missão. Depois do "stop" a música fica calada só enquanto a tela da câmera
+ * avisa ("olhando") que a pessoa está olhando. Sem aviso por [DESISTENCIA_MS], inclusive se a tela
+ * do alarme for fechada, a vigia deste serviço volta a tocar a música.
  */
 class AlarmeService : Service() {
 
@@ -36,7 +38,7 @@ class AlarmeService : Service() {
         private const val ACAO_ADIAR = "adiar"
         private const val ACAO_REEXIBIR = "reexibir"
         private const val ACAO_SILENCIAR = "silenciar"
-        private const val ACAO_RETOMAR = "retomar"
+        private const val ACAO_OLHANDO = "olhando"
         private const val ACAO_VOLUME = "volume"
         private const val EXTRA_VOLUME = "volume"
 
@@ -47,6 +49,11 @@ class AlarmeService : Service() {
 
         /** Alarme tocando agora (null = nenhum). A AlarmeActivity e a tela principal observam isso. */
         val tocando: StateFlow<Alarme?> = _tocando.asStateFlow()
+
+        private val _silenciado = MutableStateFlow(false)
+
+        /** true = a pessoa já disse "stop" e a música está calada: a tela do alarme mostra a etapa da câmera. */
+        val silenciado: StateFlow<Boolean> = _silenciado.asStateFlow()
 
         fun tocar(ctx: Context, id: Int) {
             // Só falha se o disparo veio sem alarme exato (Android 12 sem a permissão): aí o sistema
@@ -64,14 +71,14 @@ class AlarmeService : Service() {
             ctx.startService(comando(ctx, ACAO_ADIAR))
         }
 
-        /** Cala a música sem encerrar o alarme. */
+        /** A pessoa disse "stop": cala a música sem encerrar o alarme e liga a vigia. */
         fun silenciar(ctx: Context) {
             ctx.startService(comando(ctx, ACAO_SILENCIAR))
         }
 
-        /** Volta a tocar a música do começo. */
-        fun retomar(ctx: Context) {
-            ctx.startService(comando(ctx, ACAO_RETOMAR))
+        /** Sinal da etapa da câmera de que a pessoa está olhando: a vigia espera mais [DESISTENCIA_MS]. */
+        fun olhando(ctx: Context) {
+            ctx.startService(comando(ctx, ACAO_OLHANDO))
         }
 
         /** Volume da música, de 0 a 1, relativo ao volume de alarme. */
@@ -87,6 +94,16 @@ class AlarmeService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private val esgotou = Runnable { adiarEEncerrar() }
 
+    /** Vigia da missão: dispara se a música ficou calada [DESISTENCIA_MS] sem sinal de que a pessoa olha. */
+    private val vigia = Runnable {
+        Log.i(TAG, "Missão: ${DESISTENCIA_MS / 1000} s sem olhar pra câmera, música volta")
+        _silenciado.value = false
+        _tocando.value?.let {
+            sirene.ligar(it.volumeMaximo)
+            mostrarNotificacao(it) // alerta de novo, caso a tela do alarme tenha sido fechada
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         sirene = Sirene(this)
@@ -97,14 +114,15 @@ class AlarmeService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // Comandos que chegam quando o alarme já acabou só encerram o serviço
         val alarme = _tocando.value
-        if (intent?.action != ACAO_VOLUME) Log.i(TAG, "Serviço: comando ${intent?.action}")
-        when (intent?.action) {
+        val acao = intent?.action
+        if (acao != ACAO_VOLUME && acao != ACAO_OLHANDO) Log.i(TAG, "Serviço: comando $acao") // os frequentes não
+        when (acao) {
             ACAO_TOCAR -> iniciar(intent.getIntExtra(Agendador.EXTRA_ID, -1))
             ACAO_ADIAR -> adiarEEncerrar()
             // Desde o Android 14 dá pra arrastar a notificação pro lado; ela volta enquanto o alarme durar
             ACAO_REEXIBIR -> if (alarme != null) mostrarNotificacao(alarme) else encerrar()
-            ACAO_SILENCIAR -> if (alarme != null) sirene.desligar() else encerrar()
-            ACAO_RETOMAR -> if (alarme != null) sirene.ligar(alarme.volumeMaximo) else encerrar()
+            ACAO_SILENCIAR -> if (alarme != null) silenciarMusica() else encerrar()
+            ACAO_OLHANDO -> if (alarme == null) encerrar() else if (_silenciado.value) adiarVigia()
             ACAO_VOLUME -> if (alarme != null) sirene.volume(intent.getFloatExtra(EXTRA_VOLUME, 1f)) else encerrar()
             else -> encerrar()
         }
@@ -114,7 +132,9 @@ class AlarmeService : Service() {
     override fun onDestroy() {
         Log.i(TAG, "Serviço: alarme encerrado")
         handler.removeCallbacks(esgotou)
+        handler.removeCallbacks(vigia)
         sirene.desligar()
+        _silenciado.value = false
         _tocando.value = null
         wakeLock?.takeIf { it.isHeld }?.release()
         super.onDestroy()
@@ -129,12 +149,26 @@ class AlarmeService : Service() {
             return
         }
         Log.i(TAG, "Serviço: tocando \"${alarme.rotulo}\" (missão=${alarme.missao}, volume máximo=${alarme.volumeMaximo})")
+        handler.removeCallbacks(vigia) // se outro alarme estava na etapa da câmera, este recomeça do zero
+        _silenciado.value = false
         _tocando.value = alarme
         mostrarNotificacao(alarme)
         sirene.ligar(alarme.volumeMaximo)
         segurarProcessador()
         handler.removeCallbacks(esgotou)
         handler.postDelayed(esgotou, LIMITE_TOCANDO_MS)
+    }
+
+    /** A pessoa disse "stop": a música para e a vigia começa a contar. */
+    private fun silenciarMusica() {
+        sirene.desligar()
+        _silenciado.value = true
+        adiarVigia()
+    }
+
+    private fun adiarVigia() {
+        handler.removeCallbacks(vigia)
+        handler.postDelayed(vigia, DESISTENCIA_MS)
     }
 
     private fun adiarEEncerrar() {

@@ -1,6 +1,7 @@
 // Missão pra desligar o alarme, em duas etapas mostradas pela AlarmeActivity:
 // 1) FALAR: dizer "stop" (a música para); 2) OLHAR: olhar pra câmera de olhos abertos até fechar o anel.
-// Se a pessoa não olhar por DESISTENCIA_MS, a música volta e a missão recomeça da etapa 1.
+// Enquanto a pessoa olha, a etapa 2 avisa o AlarmeService a cada segundo; sem aviso por DESISTENCIA_MS
+// (não olhou, ou fechou a tela), a vigia do serviço religa a música e a missão volta pra etapa 1.
 package com.implacavel.alarme
 
 import android.Manifest
@@ -39,14 +40,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 
-enum class Etapa { FALAR, OLHAR }
-
 /** Na etapa de falar a música alterna: alta pra acordar, baixa pra voz se destacar no microfone. */
 private const val MUSICA_ALTA_MS = 5_000L
 private const val MUSICA_BAIXA_MS = 4_000L
 private const val VOLUME_ESCUTA = 0.25f
 
 private const val PASSO_MS = 100L
+
+/** De quanto em quanto tempo a etapa da câmera avisa o serviço que a pessoa está olhando. */
+private const val AVISO_OLHANDO_MS = 1_000L
 
 /** Etapa 1: ouvir "stop". Sem reconhecimento de voz disponível, aparece um botão no lugar. */
 @Composable
@@ -58,13 +60,18 @@ fun EtapaFalar(onStop: () -> Unit) {
     var janelaDeEscuta by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        while (true) {
-            janelaDeEscuta = false
+        try {
+            while (true) {
+                janelaDeEscuta = false
+                AlarmeService.volume(ctx, 1f)
+                delay(MUSICA_ALTA_MS)
+                janelaDeEscuta = true
+                AlarmeService.volume(ctx, VOLUME_ESCUTA)
+                delay(MUSICA_BAIXA_MS)
+            }
+        } finally {
+            // Saiu da etapa ou fechou a tela: a música não pode ficar presa no volume baixo
             AlarmeService.volume(ctx, 1f)
-            delay(MUSICA_ALTA_MS)
-            janelaDeEscuta = true
-            AlarmeService.volume(ctx, VOLUME_ESCUTA)
-            delay(MUSICA_BAIXA_MS)
         }
     }
     DisposableEffect(Unit) {
@@ -92,9 +99,12 @@ fun EtapaFalar(onStop: () -> Unit) {
     }
 }
 
-/** Etapa 2: câmera num círculo com um anel que enche enquanto a pessoa olha de olhos abertos. */
+/**
+ * Etapa 2: câmera num círculo com um anel que enche enquanto a pessoa olha de olhos abertos.
+ * [onOlhando] é chamado a cada [AVISO_OLHANDO_MS] enquanto ela olha (mantém a música calada).
+ */
 @Composable
-fun EtapaOlhar(onConcluiu: () -> Unit, onDesistiu: () -> Unit) {
+fun EtapaOlhar(onOlhando: () -> Unit, onConcluiu: () -> Unit) {
     val ctx = LocalContext.current
     var leitura by remember { mutableStateOf(Leitura.SEM_ROSTO) }
     if (!Poderes.concedida(ctx, Manifest.permission.CAMERA) || leitura == Leitura.SEM_CAMERA) {
@@ -102,13 +112,13 @@ fun EtapaOlhar(onConcluiu: () -> Unit, onDesistiu: () -> Unit) {
         BotaoGrande("DESLIGAR", onConcluiu, fundoClaro = true)
         return
     }
+    val avisarOlhando by rememberUpdatedState(onOlhando)
     val concluir by rememberUpdatedState(onConcluiu)
-    val desistir by rememberUpdatedState(onDesistiu)
     var progresso by remember { mutableFloatStateOf(0f) }
     var ultimaOlhada by remember { mutableLongStateOf(0L) } // último quadro com olhos abertos
     var olhando by remember { mutableStateOf(false) } // já com a tolerância a piscadas
     LaunchedEffect(Unit) {
-        val inicio = System.currentTimeMillis()
+        var ultimoAviso = 0L
         while (true) {
             delay(PASSO_MS)
             val agora = System.currentTimeMillis()
@@ -117,15 +127,14 @@ fun EtapaOlhar(onConcluiu: () -> Unit, onDesistiu: () -> Unit) {
                 olhando = agoraOlhando
                 Log.i(TAG, "Câmera: ${if (olhando) "olhando" else "parou de olhar ($leitura)"}, anel ${(progresso * 100).toInt()}%")
             }
+            if (olhando && agora - ultimoAviso >= AVISO_OLHANDO_MS) {
+                avisarOlhando()
+                ultimoAviso = agora
+            }
             progresso = avancarOlhar(progresso, olhando, PASSO_MS)
             if (progresso >= 1f) {
                 Log.i(TAG, "Missão: anel completo, alarme desligado")
                 concluir()
-                break
-            }
-            if (agora - maxOf(ultimaOlhada, inicio) > DESISTENCIA_MS) {
-                Log.i(TAG, "Missão: ${DESISTENCIA_MS / 1000} s sem olhar, música volta")
-                desistir()
                 break
             }
         }

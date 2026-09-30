@@ -8,7 +8,10 @@ import kotlin.math.ceil
 /** Tempo olhando pra câmera, de olhos abertos, pra desligar o alarme. */
 const val META_OLHAR_MS = 10_000L
 
-/** Sem olhar pra câmera por esse tempo, a música volta a tocar e a missão recomeça. */
+/**
+ * Sem sinal de que a pessoa está olhando pra câmera por esse tempo (inclusive com a tela do alarme
+ * fechada), a vigia do AlarmeService volta a tocar a música e a missão recomeça.
+ */
 const val DESISTENCIA_MS = 20_000L
 
 /**

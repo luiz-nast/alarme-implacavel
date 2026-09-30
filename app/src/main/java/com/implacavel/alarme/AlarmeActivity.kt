@@ -41,7 +41,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -97,11 +96,12 @@ class AlarmeActivity : ComponentActivity() {
 @Composable
 private fun TelaAlarme(alarme: Alarme) {
     val ctx = LocalContext.current
-    // Saveable: se a tela for recriada, a missão continua na mesma etapa (a música já pode estar calada)
-    var etapa by rememberSaveable { mutableStateOf(Etapa.FALAR) }
+    // A etapa vem do serviço (música calada = já disse STOP, falta a câmera). Assim ela sobrevive à
+    // tela ser fechada ou recriada, e a vigia do serviço, ao religar a música, volta pra etapa de falar.
+    val silenciado by AlarmeService.silenciado.collectAsStateWithLifecycle()
 
     // Na etapa da câmera a tela fica clara e no brilho máximo, pra iluminar o rosto no escuro
-    val claro = alarme.missao && etapa == Etapa.OLHAR
+    val claro = alarme.missao && silenciado
     BrilhoMaximo(claro)
     val corTexto = if (claro) Color(0xFF3B0000) else Color.White
     val fundo = if (claro) {
@@ -151,18 +151,10 @@ private fun TelaAlarme(alarme: Alarme) {
                 Spacer(Modifier.height(16.dp))
                 when {
                     !alarme.missao -> BotaoGrande("DESLIGAR", { AlarmeService.parar(ctx) })
-                    etapa == Etapa.FALAR -> EtapaFalar(
-                        onStop = {
-                            AlarmeService.silenciar(ctx)
-                            etapa = Etapa.OLHAR
-                        },
-                    )
+                    !silenciado -> EtapaFalar(onStop = { AlarmeService.silenciar(ctx) })
                     else -> EtapaOlhar(
+                        onOlhando = { AlarmeService.olhando(ctx) },
                         onConcluiu = { AlarmeService.parar(ctx) },
-                        onDesistiu = {
-                            AlarmeService.retomar(ctx)
-                            etapa = Etapa.FALAR
-                        },
                     )
                 }
                 Spacer(Modifier.height(16.dp))

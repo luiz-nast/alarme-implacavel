@@ -17,7 +17,7 @@ App Android de despertador feito pra ser impossível de ignorar. Ele toma a tela
 | Missão, etapa 1: dizer STOP | Reconhecedor de voz do sistema em loop; a música alterna 5 s alta e 4 s a 25% pra voz ser ouvida | `OuvinteStop.kt`, `Missao.kt` |
 | Missão, etapa 2: olhar pra câmera | Câmera frontal num círculo com anel de progresso: enche olhando de olhos abertos, esvazia 2× mais rápido sem olhar (piscadas de até 0,6 s não contam) | `CameraOlhos.kt`, `Missao.kt` |
 | Feedback visual da câmera | Anel e texto verde (olhando), âmbar (de lado) ou vermelho (olhos fechados, sem rosto); tela clara no brilho máximo pra iluminar o rosto | `Missao.kt`, `AlarmeActivity.kt` |
-| Não dá pra enrolar | 20 s sem olhar pra câmera: a música volta e a missão recomeça | `Missao.kt` |
+| Não dá pra enrolar | 20 s sem olhar pra câmera: a música volta e a missão recomeça. Vale também se a tela do alarme for fechada, porque a vigia fica no serviço | `AlarmeService.kt` |
 | Volume travado no máximo (opcional) | A cada 1 s, restaura o volume de alarme se alguém abaixar | `Sirene.kt` |
 | Pausa música e vídeo de outros apps | Foco de áudio `AUDIOFOCUS_GAIN_TRANSIENT` | `Sirene.kt` |
 | Notificação que não some | `setDeleteIntent` reexibe a notificação se o usuário arrastar (Android 14+) | `AlarmeService.kt` |
@@ -62,8 +62,9 @@ flowchart LR
     Svc -->|notificação em tela cheia| Tela["AlarmeActivity"]
     Tela --> Falar["EtapaFalar + OuvinteStop"]
     Falar -->|disse stop: silenciar| Olhar["EtapaOlhar + CameraOlhos (ML Kit)"]
+    Olhar -->|olhando: sinal a cada 1 s| Svc
     Olhar -->|anel completo: parar| Svc
-    Olhar -->|20 s sem olhar: retomar| Falar
+    Svc -->|20 s sem sinal: vigia religa a música| Falar
     Boot["BootReceiver"] -->|reinício, relógio, atualização| Ag
 ```
 
@@ -72,6 +73,7 @@ Estado compartilhado, sem ViewModel, injeção de dependência ou banco de dados
 - `Alarmes.lista` (`StateFlow<List<Alarme>>`) é a lista salva. A tela observa; receivers e serviço leem e gravam.
 - `Ajustes.musica` (`StateFlow<Musica?>`) é a música escolhida (URI + nome).
 - `AlarmeService.tocando` (`StateFlow<Alarme?>`) é o alarme ativo agora. A `AlarmeActivity` fecha sozinha quando vira `null`.
+- `AlarmeService.silenciado` (`StateFlow<Boolean>`) diz se a pessoa já disse "stop" (música calada). A tela deriva a etapa daqui: `false` = FALAR, `true` = OLHAR.
 
 Ciclo de vida de um disparo:
 
@@ -85,8 +87,9 @@ Ciclo de vida de um disparo:
 3. `AlarmeService` vira serviço em primeiro plano (`specialUse`), mostra a notificação e liga a `Sirene`.
 4. Com a tela desligada ou bloqueada, o sistema abre a `AlarmeActivity`. Com o celular em uso, aparece a notificação (na Samsung, primeiro a borda iluminada, depois a tela cheia).
 5. Com `missao = true`, a tela faz a missão:
-   - **FALAR:** a `EtapaFalar` alterna o volume da música via `AlarmeService.volume` e escuta com `OuvinteStop`. Ao ouvir "stop", chama `AlarmeService.silenciar`: a música para, mas o serviço e a notificação continuam.
-   - **OLHAR:** a `EtapaOlhar` abre a `CameraOlhos` e enche o anel. Anel completo chama `AlarmeService.parar`. 20 s sem olhar chama `AlarmeService.retomar` e volta pro FALAR.
+   - **FALAR:** a `EtapaFalar` alterna o volume da música via `AlarmeService.volume` e escuta com `OuvinteStop`. Ao ouvir "stop", chama `AlarmeService.silenciar`: a música para, `silenciado` vira `true` e a vigia do serviço começa a contar 20 s.
+   - **OLHAR:** a `EtapaOlhar` abre a `CameraOlhos` e enche o anel. Enquanto a pessoa olha, chama `AlarmeService.olhando` a cada segundo, e cada sinal empurra a vigia mais 20 s. Anel completo chama `AlarmeService.parar`.
+   - **Vigia:** 20 s sem sinal (a pessoa não olhou ou fechou a tela) religam a música e a notificação; `silenciado` volta a `false` e a tela, se estiver aberta, volta pro FALAR.
 
    Com `missao = false`, aparece só o botão DESLIGAR.
 6. Parar ou adiar encerra o serviço; a limpeza acontece em `onDestroy`.
@@ -104,7 +107,7 @@ Código em `app/src/main/java/com/implacavel/alarme/`. Cada arquivo começa com 
 | `Agendador.kt` | AlarmManager: agendar, soneca, cancelar, reagendar tudo |
 | `AlarmeReceiver.kt` | Recebe o disparo, atualiza o alarme salvo e chama o serviço |
 | `BootReceiver.kt` | Reagenda depois de reiniciar, mudar relógio/fuso ou atualizar o app |
-| `AlarmeService.kt` | Serviço em primeiro plano: notificação, comandos (`tocar`, `parar`, `adiar`, `reexibir`, `silenciar`, `retomar`, `volume`), soneca automática |
+| `AlarmeService.kt` | Serviço em primeiro plano: notificação, comandos (`tocar`, `parar`, `adiar`, `reexibir`, `silenciar`, `olhando`, `volume`), vigia da missão, soneca automática |
 | `Sirene.kt` | Música em loop, vibração, foco de áudio, volume relativo e trava de volume |
 | `Notificacoes.kt` | Canal "Alarme tocando" (mudo de propósito; o som vem da `Sirene`) |
 | `Poderes.kt` | Permissões necessárias: checagem, diálogo do sistema ou tela das Configurações |
@@ -136,7 +139,8 @@ Outros arquivos:
 - **"Stop" com sotaque.** `disseStop` aceita "stop", "estop", "istópi", "stopi" etc., em qualquer ponto da frase, sem acento. O reconhecedor usa o idioma do sistema e prefere o modo offline.
 - **Olhar = rosto de frente + dois olhos abertos.** Giro de até 20°, probabilidade de olho aberto do ML Kit acima de 60%. É detecção de rosto, **não** reconhecimento de quem é: qualquer rosto serve.
 - **Piscar não derruba o anel.** A leitura da câmera oscila quadro a quadro entre "olhando" e "olhos fechados". Por isso só conta como "parou de olhar" depois de `TOLERANCIA_PISCADA_MS` (0,6 s) sem nenhum quadro de olhos abertos.
-- **Girar o celular não reinicia a missão.** A `AlarmeActivity` declara `configChanges` (câmera e microfone seguem rodando) e guarda a etapa com `rememberSaveable`. Antes, girar recriava a tela e voltava pro "diga STOP" com a música já calada.
+- **Girar o celular não reinicia a missão.** A `AlarmeActivity` declara `configChanges`, então câmera e microfone seguem rodando. Antes, girar recriava a tela e voltava pro "diga STOP" com a música já calada.
+- **A vigia da missão fica no serviço, não na tela.** Num teste, dizer "stop" e fechar a tela do alarme deixava a música calada até a soneca automática de 10 min: a regra dos 20 s morria junto com a tela. Agora a etapa vem de `AlarmeService.silenciado`, a tela só manda sinais de "olhando", e é o serviço (que continua vivo) quem religa a música.
 - **ML Kit com modelo embutido**, e não o baixado pelo Google Play Services: funciona offline e antes do primeiro desbloqueio. Custa ~8 MB por tipo de processador, por isso o APK só inclui ARM (`abiFilters`); o lint avisa da falta de x86 pra Chromebook, e isso é de propósito.
 - **ML Kit precisa de regra no R8.** O ML Kit cria partes de si mesmo por reflexão. No modo completo do R8 (padrão do AGP 9), os construtores delas sumiam e `FaceDetection.getClient` quebrava com `NullPointerException` ao abrir a câmera. `app/proguard-rules.pro` mantém `com.google.mlkit.**` e `com.google.android.gms.internal.mlkit_**` inteiros.
 - **Sempre há saída.** Sem microfone ou reconhecimento de voz, a etapa FALAR mostra "PARAR A MÚSICA". Sem câmera, a etapa OLHAR mostra "DESLIGAR". Um alarme que não desliga nunca seria pior.
