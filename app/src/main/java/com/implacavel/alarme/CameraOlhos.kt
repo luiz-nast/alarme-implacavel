@@ -2,7 +2,9 @@ package com.implacavel.alarme
 
 import android.util.Log
 import androidx.annotation.OptIn
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.CameraState
 import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
@@ -26,9 +28,13 @@ import com.google.mlkit.vision.face.FaceDetector
 import com.google.mlkit.vision.face.FaceDetectorOptions
 import java.util.concurrent.Executors
 
+/** Detector de rosto falhando esse tanto de quadros seguidos (uns 3 s) é defeito. */
+private const val FALHAS_SEGUIDAS_MAX = 30
+
 /**
  * Câmera frontal com detecção de rosto (ML Kit, roda no aparelho, sem internet). A cada quadro
- * informa uma [Leitura]; se a câmera não abrir, informa [Leitura.SEM_CAMERA].
+ * informa uma [Leitura]. Com defeito (não abre, erro grave da câmera ou o detector falhando em
+ * todo quadro), informa [Leitura.SEM_CAMERA].
  */
 @Composable
 fun CameraOlhos(modifier: Modifier, onLeitura: (Leitura) -> Unit) {
@@ -43,6 +49,8 @@ fun CameraOlhos(modifier: Modifier, onLeitura: (Leitura) -> Unit) {
     }
     DisposableEffect(dono) {
         var descartado = false
+        var camera: Camera? = null
+        var falhasSeguidas = 0 // só mexida na thread principal, onde o ML Kit entrega o resultado
         val executor = Executors.newSingleThreadExecutor()
         val detector = FaceDetection.getClient(OPCOES_ROSTO)
         val futuro = ProcessCameraProvider.getInstance(ctx)
@@ -53,10 +61,26 @@ fun CameraOlhos(modifier: Modifier, onLeitura: (Leitura) -> Unit) {
                 val analise = ImageAnalysis.Builder()
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .build()
-                analise.setAnalyzer(executor) { quadro -> analisar(quadro, detector) { informar(it) } }
+                analise.setAnalyzer(executor) { quadro ->
+                    analisar(
+                        quadro, detector,
+                        onLeitura = {
+                            falhasSeguidas = 0
+                            informar(it)
+                        },
+                        onFalha = {
+                            if (++falhasSeguidas == FALHAS_SEGUIDAS_MAX) {
+                                Log.w(TAG, "Câmera: o detector de rosto falhou $FALHAS_SEGUIDAS_MAX vezes seguidas")
+                                informar(Leitura.SEM_CAMERA)
+                            }
+                        },
+                    )
+                }
                 val cameras = futuro.get()
                 cameras.unbindAll()
-                cameras.bindToLifecycle(dono, CameraSelector.DEFAULT_FRONT_CAMERA, preview, analise)
+                val aberta = cameras.bindToLifecycle(dono, CameraSelector.DEFAULT_FRONT_CAMERA, preview, analise)
+                aberta.cameraInfo.cameraState.observe(dono) { estado -> estado.error?.let { tratarErro(it, informar) } }
+                camera = aberta
                 Log.i(TAG, "Câmera: aberta")
             }.onFailure {
                 Log.w(TAG, "Câmera: não abriu", it)
@@ -65,6 +89,7 @@ fun CameraOlhos(modifier: Modifier, onLeitura: (Leitura) -> Unit) {
         }, ContextCompat.getMainExecutor(ctx))
         onDispose {
             descartado = true
+            camera?.cameraInfo?.cameraState?.removeObservers(dono)
             if (futuro.isDone) runCatching { futuro.get().unbindAll() }
             detector.close()
             executor.shutdown()
@@ -73,8 +98,18 @@ fun CameraOlhos(modifier: Modifier, onLeitura: (Leitura) -> Unit) {
     AndroidView(factory = { visor }, modifier = modifier)
 }
 
+/**
+ * Erro grave da câmera (não tem como voltar a funcionar) é defeito: [onLeitura] recebe SEM_CAMERA.
+ * Câmera bloqueada no atalho de privacidade do Android é escolha, não defeito: liberando, ela volta.
+ * Os erros passageiros (outro app usando a câmera) o CameraX resolve sozinho.
+ */
+private fun tratarErro(erro: CameraState.StateError, onLeitura: (Leitura) -> Unit) {
+    Log.w(TAG, "Câmera: erro ${erro.code} (${erro.type})")
+    if (erro.type == CameraState.ErrorType.CRITICAL && erro.code != CameraState.ERROR_CAMERA_DISABLED) onLeitura(Leitura.SEM_CAMERA)
+}
+
 @OptIn(ExperimentalGetImage::class)
-private fun analisar(quadro: ImageProxy, detector: FaceDetector, onLeitura: (Leitura) -> Unit) {
+private fun analisar(quadro: ImageProxy, detector: FaceDetector, onLeitura: (Leitura) -> Unit, onFalha: () -> Unit) {
     val imagem = quadro.image
     if (imagem == null) {
         quadro.close()
@@ -82,6 +117,7 @@ private fun analisar(quadro: ImageProxy, detector: FaceDetector, onLeitura: (Lei
     }
     detector.process(InputImage.fromMediaImage(imagem, quadro.imageInfo.rotationDegrees))
         .addOnSuccessListener { rostos -> onLeitura(lerRosto(rostos)) }
+        .addOnFailureListener { onFalha() }
         .addOnCompleteListener { quadro.close() }
 }
 

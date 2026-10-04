@@ -1,13 +1,16 @@
 // Missão pra desligar o alarme, em duas etapas mostradas pela AlarmeActivity:
-// 1) FALAR: dizer "stop" (a música para); 2) OLHAR: olhar pra câmera de olhos abertos até fechar o anel.
-// Enquanto a pessoa olha, a etapa 2 avisa o AlarmeService a cada segundo; sem aviso por DESISTENCIA_MS
-// (não olhou, ou fechou a tela), a vigia do serviço religa a música e a missão volta pra etapa 1.
+// 1) FALAR: dizer "stop" (a música para); 2) OLHAR: olhar pra câmera de olhos abertos até fechar o anel
+// (20 min; 30 s no botão de teste). Enquanto a pessoa olha, a etapa 2 avisa o AlarmeService a cada
+// segundo. Sem aviso, a vigia do serviço bipa a cada AVISO_SEM_OLHAR_MS, cada vez mais alto (a tela
+// mostra quanto falta pra zerar), e em DESISTENCIA_MS (não olhou, ou fechou a tela) religa a música:
+// a missão volta pra etapa 1, com o anel zerado.
 // Logo depois de o celular reiniciar, antes do primeiro desbloqueio, vem antes a etapa DESBLOQUEAR.
 package com.implacavel.alarme
 
 import android.Manifest
 import android.app.Activity
 import android.app.KeyguardManager
+import android.os.SystemClock
 import android.util.Log
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -25,7 +28,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -55,6 +58,9 @@ private const val PASSO_MS = 100L
 
 /** De quanto em quanto tempo a etapa da câmera avisa o serviço que a pessoa está olhando. */
 private const val AVISO_OLHANDO_MS = 1_000L
+
+/** Sem quadro novo da câmera por esse tempo (câmera travada), a última leitura deixa de valer. */
+private const val QUADRO_VELHO_MS = 1_000L
 
 /**
  * Etapa 0, só logo depois de o celular reiniciar: antes do primeiro desbloqueio o reconhecimento de
@@ -134,11 +140,14 @@ fun EtapaFalar(onStop: () -> Unit) {
 }
 
 /**
- * Etapa 2: câmera num círculo com um anel que enche enquanto a pessoa olha de olhos abertos.
- * [onOlhando] é chamado a cada [AVISO_OLHANDO_MS] enquanto ela olha (mantém a música calada).
+ * Etapa 2: câmera num círculo com um anel que enche enquanto a pessoa olha de olhos abertos, até
+ * somar [metaMs]. [onOlhando] recebe o tempo já somado a cada [AVISO_OLHANDO_MS] enquanto ela olha
+ * e no instante em que ela para (mantém a música calada; o serviço guarda o tempo, em
+ * [AlarmeService.olhado]). Sem olhar, a tela mostra a contagem pra zerar, a partir do último sinal
+ * recebido pelo serviço ([AlarmeService.ultimoOlhar]); bipes e zerar são da vigia de lá.
  */
 @Composable
-fun EtapaOlhar(onOlhando: () -> Unit, onConcluiu: () -> Unit) {
+fun EtapaOlhar(metaMs: Long, onOlhando: (olhadoMs: Long) -> Unit, onConcluiu: () -> Unit) {
     val ctx = LocalContext.current
     // Tirar a permissão da câmera não é saída: sem ela, o único caminho é liberar de novo
     var liberada by remember { mutableStateOf(Poder.CAMERA.liberado(ctx)) }
@@ -151,6 +160,7 @@ fun EtapaOlhar(onOlhando: () -> Unit, onConcluiu: () -> Unit) {
         return
     }
     var leitura by remember { mutableStateOf(Leitura.SEM_ROSTO) }
+    var quandoLeu by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     if (leitura == Leitura.SEM_CAMERA) {
         // A câmera deu defeito (a permissão existe): sem como conferir os olhos, desliga no botão
         BotaoGrande("DESLIGAR", onConcluiu, fundoClaro = true)
@@ -158,25 +168,36 @@ fun EtapaOlhar(onOlhando: () -> Unit, onConcluiu: () -> Unit) {
     }
     val avisarOlhando by rememberUpdatedState(onOlhando)
     val concluir by rememberUpdatedState(onConcluiu)
-    var progresso by remember { mutableFloatStateOf(0f) }
+    // A meta pode subir no meio: alarme de verdade disparando durante o teste (EmAndamento.juntar)
+    val meta by rememberUpdatedState(metaMs)
+    // Continua do que o serviço guardou (tela recriada no meio, ex.: o modo escuro do sistema mudou);
+    // rodada nova vem zerada de lá
+    var olhadoMs by remember { mutableLongStateOf(AlarmeService.olhado.value) }
+    var zeraEm by remember { mutableStateOf<Int?>(null) }
     LaunchedEffect(Unit) {
+        var antes = SystemClock.elapsedRealtime()
         var ultimoAviso = 0L
         var olhavaAntes = false
         while (true) {
             delay(PASSO_MS)
+            val agora = SystemClock.elapsedRealtime()
+            // Câmera travada vale como sem rosto: imagem velha não enche o anel
+            if (agora - quandoLeu > QUADRO_VELHO_MS) leitura = Leitura.SEM_ROSTO
             // Vale o quadro atual: tirou o rosto ou fechou os olhos, o anel para na hora
             val olhando = leitura == Leitura.OLHANDO
             if (olhando != olhavaAntes) {
-                olhavaAntes = olhando
-                Log.i(TAG, "Câmera: ${if (olhando) "olhando" else "parou de olhar ($leitura)"}, anel ${(progresso * 100).toInt()}%")
+                Log.i(TAG, "Câmera: ${if (olhando) "olhando" else "parou de olhar ($leitura)"}, anel ${olhadoMs * 100 / meta}%")
             }
-            val agora = System.currentTimeMillis()
-            if (olhando && agora - ultimoAviso >= AVISO_OLHANDO_MS) {
-                avisarOlhando()
+            olhadoMs = avancarOlhar(olhadoMs, olhando, passoMs = agora - antes)
+            antes = agora
+            // A cada segundo olhando, e no instante em que parou: a contagem pra zerar começa daí
+            if (olhando && agora - ultimoAviso >= AVISO_OLHANDO_MS || olhavaAntes && !olhando) {
+                avisarOlhando(olhadoMs)
                 ultimoAviso = agora
             }
-            progresso = avancarOlhar(progresso, leitura, PASSO_MS)
-            if (progresso >= 1f) {
+            olhavaAntes = olhando
+            zeraEm = if (olhando) null else segundosParaZerar(agora - AlarmeService.ultimoOlhar.value)
+            if (olhadoMs >= meta) {
                 Log.i(TAG, "Missão: anel completo, alarme desligado")
                 concluir()
                 break
@@ -188,12 +209,17 @@ fun EtapaOlhar(onOlhando: () -> Unit, onConcluiu: () -> Unit) {
     val cor by animateColorAsState(corAlvo, label = "cor da leitura")
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(contentAlignment = Alignment.Center) {
-            CameraOlhos(Modifier.size(220.dp).clip(CircleShape)) { leitura = it }
-            AnelProgresso(progresso, cor, Modifier.size(252.dp))
+            CameraOlhos(Modifier.size(220.dp).clip(CircleShape)) {
+                leitura = it
+                quandoLeu = SystemClock.elapsedRealtime()
+            }
+            AnelProgresso(olhadoMs.toFloat() / metaMs, cor, Modifier.size(252.dp))
         }
         Spacer(Modifier.height(16.dp))
         Text(mensagem, color = cor, fontSize = 24.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-        Text("Mais ${segundosRestantes(progresso)} s de olhos abertos", color = VinhoAlarme, fontSize = 16.sp)
+        Text("Mais ${tempoRestante(metaMs - olhadoMs)} de olhos abertos", color = VinhoAlarme, fontSize = 16.sp)
+        // Linha sempre presente (vazia enquanto olha), pra tela não pular quando a contagem aparece
+        Text(zeraEm?.let { "$it s pra zerar" } ?: "", color = VermelhoAviso, fontSize = 28.sp, fontWeight = FontWeight.Black)
     }
 }
 
@@ -253,10 +279,12 @@ private fun AnelProgresso(progresso: Float, cor: Color, modifier: Modifier) {
     }
 }
 
+private val VermelhoAviso = Color(0xFFC62828)
+
 /** O retorno visual de cada leitura da câmera: cor (verde, âmbar ou vermelho) e mensagem. */
 private fun retorno(leitura: Leitura): Pair<Color, String> = when (leitura) {
     Leitura.OLHANDO -> Color(0xFF2E7D32) to "Isso! Continua olhando"
     Leitura.DE_LADO -> Color(0xFFEF8F00) to "Olha direto pra câmera"
-    Leitura.OLHOS_FECHADOS -> Color(0xFFC62828) to "Abre esses olhos!"
-    Leitura.SEM_ROSTO, Leitura.SEM_CAMERA -> Color(0xFFC62828) to "Cadê você? Aproxima o rosto"
+    Leitura.OLHOS_FECHADOS -> VermelhoAviso to "Abre esses olhos!"
+    Leitura.SEM_ROSTO, Leitura.SEM_CAMERA -> VermelhoAviso to "Cadê você? Aproxima o rosto"
 }

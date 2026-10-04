@@ -125,7 +125,7 @@ fun CartaoAlarme(alarme: Alarme, agora: ZonedDateTime, onLigar: (Boolean) -> Uni
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 val extras = listOfNotNull(
-                    "missão: STOP + câmera".takeIf { alarme.missao },
+                    "missão: STOP + 20 min de câmera".takeIf { alarme.missao },
                     "volume forte".takeIf { alarme.volumeForte },
                 )
                 if (extras.isNotEmpty()) {

@@ -2,6 +2,7 @@ package com.implacavel.alarme
 
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.ZoneId
@@ -67,20 +68,35 @@ class AlarmeTest {
     fun doisAlarmesJuntosFicamComAExigenciaMaior() {
         // Pré-alarme sem missão ainda tocando quando o alarme de verdade dispara
         val preAlarme = EmAndamento(Alarme(1, 6, 55, missao = false, volumeForte = false), desde = 0, musica = null, volume = 5)
-        val junto = preAlarme.juntar(Alarme(2, 7, 0, missao = true, volumeForte = true))
+        val junto = preAlarme.juntar(Alarme(2, 7, 0, missao = true, volumeForte = true), agora = 300_000)
         assertTrue(junto.alarme.missao)
         assertTrue(junto.alarme.volumeForte)
-        assertEquals(1, junto.alarme.id) // segue o mesmo alarme, com a música e o volume de antes
+        assertEquals(1, junto.alarme.id) // segue o mesmo alarme, desde a mesma hora, com a música e o volume de antes
+        assertEquals(0L, junto.desde)
         assertEquals(5, junto.volume)
         // Juntar com um alarme mais fraco não afrouxa nada
-        assertEquals(junto, junto.juntar(Alarme(3, 7, 5, missao = false, volumeForte = false)))
+        assertEquals(junto, junto.juntar(Alarme(3, 7, 5, missao = false, volumeForte = false), agora = 600_000))
+    }
+
+    @Test
+    fun alarmeDeVerdadeNoMeioDoTesteTomaOLugarDele() {
+        val teste = EmAndamento(Alarme.teste(), desde = 0, musica = "content://musica/1", volume = 3)
+        val junto = teste.juntar(Alarme(5, 7, 0), agora = 99)
+        assertEquals(EmAndamento(Alarme(5, 7, 0), desde = 99, musica = "content://musica/1", volume = 3), junto)
+        assertEquals(META_OLHAR_MS, metaOlhar(junto.alarme)) // 20 min, não os 30 s do teste
+        assertEquals(11, junto.volumeTravado(maximo = 15)) // 70%, não os 50% do teste
+        // Com as regras dele: alarme sem missão continua sem missão
+        assertFalse(teste.juntar(Alarme(6, 7, 0, missao = false), agora = 99).alarme.missao)
+        // O contrário: o teste no meio do alarme de verdade não muda nada
+        val deVerdade = EmAndamento(Alarme(5, 7, 0, missao = false), desde = 0, musica = null, volume = 3)
+        assertEquals(deVerdade, deVerdade.juntar(Alarme.teste(), agora = 99))
     }
 
     @Test
     fun volumeTravadoNoTesteNoForteENoNormal() {
         val normal = EmAndamento(Alarme(1, 7, 0, volumeForte = false), desde = 0, musica = null, volume = 4)
         assertEquals(4, normal.volumeTravado(maximo = 15)) // o volume de antes do alarme
-        assertEquals(11, normal.juntar(Alarme(2, 7, 0, volumeForte = true)).volumeTravado(maximo = 15)) // 70% de 15
+        assertEquals(11, normal.juntar(Alarme(2, 7, 0, volumeForte = true), agora = 0).volumeTravado(maximo = 15)) // 70% de 15
         assertEquals(8, EmAndamento(Alarme.teste(), desde = 0, musica = null, volume = 3).volumeTravado(maximo = 15)) // 50% de 15
     }
 

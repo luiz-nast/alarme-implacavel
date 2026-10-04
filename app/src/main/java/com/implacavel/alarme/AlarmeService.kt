@@ -32,7 +32,8 @@ import java.time.LocalTime
  * - tela do alarme fechada (Home, arrastar o app, apagar a tela): em [TELA_FECHADA_MS] a música
  *   volta e a tela reabre;
  * - depois do "stop", a música só fica calada enquanto a câmera avisa ("olhando") que a pessoa
- *   olha; sem aviso por [DESISTENCIA_MS], a vigia religa a música;
+ *   olha; sem aviso, a vigia bipa a cada [AVISO_SEM_OLHAR_MS], cada vez mais alto, e em
+ *   [DESISTENCIA_MS] religa a música (o anel zera);
  * - a cada [RENOVAR_MS], empurra pra frente a retomada no AlarmManager: se o app cair, travar ou
  *   for encerrado, ou se o celular desligar, o alarme volta sozinho;
  * - se o app caiu [LIMITE_QUEDAS] vezes neste alarme, é defeito, não truque: ele volta com o
@@ -57,6 +58,7 @@ class AlarmeService : Service() {
         private const val ACAO_DAR_TEMPO = "dar_tempo"
         private const val EXTRA_VOLUME = "volume"
         private const val EXTRA_ABERTA = "aberta"
+        private const val EXTRA_OLHADO = "olhado"
 
         /**
          * Tela do alarme fechada no meio: tempo até a música voltar e a tela reabrir. O Android ainda leva
@@ -82,6 +84,22 @@ class AlarmeService : Service() {
         /** true = a pessoa já disse "stop" e a música está calada: a tela do alarme mostra a etapa da câmera. */
         val silenciado: StateFlow<Boolean> = _silenciado.asStateFlow()
 
+        private val _ultimoOlhar = MutableStateFlow(0L)
+
+        /**
+         * Quando (SystemClock.elapsedRealtime) chegou o último sinal de "olhando", ou o "stop". A vigia
+         * conta daqui os bipes e o tempo pra zerar, e a tela do alarme mostra daqui a contagem.
+         */
+        val ultimoOlhar: StateFlow<Long> = _ultimoOlhar.asStateFlow()
+
+        private val _olhado = MutableStateFlow(0L)
+
+        /**
+         * Tempo de olhos abertos já somado no anel nesta rodada da câmera, em ms. Só muda com a música
+         * calada e zera quando ela volta: cada rodada começa do zero, e a tela recriada no meio continua daqui.
+         */
+        val olhado: StateFlow<Long> = _olhado.asStateFlow()
+
         /** Toca o alarme em andamento (ou atualiza o que já toca). */
         fun tocar(ctx: Context) {
             // Só falha se o disparo veio sem alarme exato (Android 12 sem a permissão): aí o sistema
@@ -104,8 +122,11 @@ class AlarmeService : Service() {
         /** A pessoa disse "stop": cala a música sem encerrar o alarme e liga a vigia. */
         fun silenciar(ctx: Context) { ctx.startService(comando(ctx, ACAO_SILENCIAR)) }
 
-        /** Sinal da etapa da câmera de que a pessoa está olhando: a vigia espera mais [DESISTENCIA_MS]. */
-        fun olhando(ctx: Context) { ctx.startService(comando(ctx, ACAO_OLHANDO)) }
+        /**
+         * Sinal da etapa da câmera de que a pessoa está olhando (ou olhava até agora), com o tempo
+         * [olhadoMs] já somado no anel: a vigia recomeça do zero.
+         */
+        fun olhando(ctx: Context, olhadoMs: Long) { ctx.startService(comando(ctx, ACAO_OLHANDO).putExtra(EXTRA_OLHADO, olhadoMs)) }
 
         /** Volume da música, de 0 a 1, relativo ao volume de alarme. */
         fun volume(ctx: Context, fator: Float) { ctx.startService(comando(ctx, ACAO_VOLUME).putExtra(EXTRA_VOLUME, fator)) }
@@ -120,6 +141,7 @@ class AlarmeService : Service() {
     private lateinit var processador: PowerManager.WakeLock
     private var telaAberta = true
     private var foraAte = 0L // SystemClock.elapsedRealtime
+    private var bipes = 0 // da vigia, desde o último sinal de "olhando"
     private val handler = Handler(Looper.getMainLooper())
 
     /**
@@ -134,11 +156,24 @@ class AlarmeService : Service() {
         }
     }
 
-    /** Vigia da missão: dispara se a música ficou calada [DESISTENCIA_MS] sem sinal de que a pessoa olha. */
-    private val vigia = Runnable {
-        Log.i(TAG, "Missão: ${DESISTENCIA_MS / 1000} s sem olhar pra câmera, música volta")
-        religarMusica()
-        _tocando.value?.let { mostrarNotificacao(it) } // alerta de novo
+    /**
+     * Vigia da missão, com a música calada: a cada [AVISO_SEM_OLHAR_MS] sem sinal de que a pessoa
+     * olha, um bipe mais alto que o anterior; em [DESISTENCIA_MS], a música volta e a missão recomeça.
+     */
+    private val vigia = object : Runnable {
+        override fun run() {
+            if (bipes < BIPES_ATE_ZERAR) {
+                bipes++
+                Log.i(TAG, "Missão: ${bipes * AVISO_SEM_OLHAR_MS / 1000} s sem olhar pra câmera, bipe $bipes")
+                sirene.bipe(volumeDoBipe(bipes))
+                // O próximo bipe; depois do último, o resto do tempo até zerar
+                handler.postDelayed(this, if (bipes < BIPES_ATE_ZERAR) AVISO_SEM_OLHAR_MS else DESISTENCIA_MS - bipes * AVISO_SEM_OLHAR_MS)
+                return
+            }
+            Log.i(TAG, "Missão: ${DESISTENCIA_MS / 1000} s sem olhar pra câmera, música volta e o anel zera")
+            religarMusica()
+            _tocando.value?.let { mostrarNotificacao(it) } // alerta de novo
+        }
     }
 
     /** A tela do alarme sumiu e não voltou: música de volta e tela reaberta por uma nova notificação em tela cheia. */
@@ -174,7 +209,7 @@ class AlarmeService : Service() {
             acao == ACAO_REEXIBIR -> mostrarNotificacao(alarme)
             acao == ACAO_TELA -> telaMudou(intent.getBooleanExtra(EXTRA_ABERTA, true))
             acao == ACAO_SILENCIAR -> silenciarMusica()
-            acao == ACAO_OLHANDO -> if (_silenciado.value) adiarVigia()
+            acao == ACAO_OLHANDO -> olhou(intent.getLongExtra(EXTRA_OLHADO, 0L))
             // Com a tela fechada não há janela de escuta: a música fica no volume cheio
             acao == ACAO_VOLUME -> if (telaAberta) sirene.volume(intent.getFloatExtra(EXTRA_VOLUME, 1f))
             acao == ACAO_DAR_TEMPO -> foraAte = SystemClock.elapsedRealtime() + TEMPO_FORA_MS
@@ -189,6 +224,7 @@ class AlarmeService : Service() {
         notificacoes().cancel(Notificacoes.ID_CHAMADA)
         sirene.desligar()
         _silenciado.value = false
+        _olhado.value = 0
         _tocando.value = null
         if (processador.isHeld) processador.release()
         super.onDestroy()
@@ -248,16 +284,27 @@ class AlarmeService : Service() {
         adiarVigia()
     }
 
-    private fun adiarVigia() {
-        handler.removeCallbacks(vigia)
-        handler.postDelayed(vigia, DESISTENCIA_MS)
+    /** Sinal de "olhando" da etapa da câmera: guarda o tempo já somado no anel e zera a contagem da vigia. */
+    private fun olhou(olhadoMs: Long) {
+        if (!_silenciado.value) return // sinal atrasado de uma rodada que já acabou
+        _olhado.value = maxOf(_olhado.value, olhadoMs)
+        adiarVigia()
     }
 
-    /** Música de volta no volume cheio; se estava calada, a missão volta pra etapa de falar. */
+    /** Sinal de "olhando" (ou o "stop"): a contagem sem olhar recomeça do zero, sem bipes. */
+    private fun adiarVigia() {
+        _ultimoOlhar.value = SystemClock.elapsedRealtime()
+        bipes = 0
+        handler.removeCallbacks(vigia)
+        handler.postDelayed(vigia, AVISO_SEM_OLHAR_MS)
+    }
+
+    /** Música de volta no volume cheio; se estava calada, a missão volta pra etapa de falar, com o anel zerado. */
     private fun religarMusica() {
         handler.removeCallbacks(vigia)
         if (_silenciado.value) {
             _silenciado.value = false
+            _olhado.value = 0
             sirene.tocar()
         } else {
             sirene.volume(1f)

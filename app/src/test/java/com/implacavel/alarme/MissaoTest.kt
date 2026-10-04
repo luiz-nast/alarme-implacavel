@@ -2,6 +2,7 @@ package com.implacavel.alarme
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -42,21 +43,43 @@ class MissaoTest {
 
     @Test
     fun anelSoSobeOlhandoENuncaDesce() {
-        var progresso = 0f
-        repeat(50) { progresso = avancarOlhar(progresso, Leitura.OLHANDO, passoMs = 100) }
-        assertEquals(0.5f, progresso, 0.001f)
-        // Sem olhos abertos no quadro atual, o anel para na hora e fica onde está
-        for (leitura in listOf(Leitura.SEM_ROSTO, Leitura.DE_LADO, Leitura.OLHOS_FECHADOS, Leitura.SEM_CAMERA)) {
-            repeat(30) { progresso = avancarOlhar(progresso, leitura, passoMs = 100) }
-            assertEquals(leitura.name, 0.5f, progresso, 0.001f)
-        }
-        assertEquals(1f, avancarOlhar(0.999f, Leitura.OLHANDO, passoMs = 100), 0f)
+        var olhado = 0L
+        repeat(50) { olhado = avancarOlhar(olhado, olhando = true, passoMs = 100) }
+        assertEquals(5_000L, olhado)
+        // Sem olhos abertos agora, o anel para na hora e fica onde está
+        repeat(30) { olhado = avancarOlhar(olhado, olhando = false, passoMs = 100) }
+        assertEquals(5_000L, olhado)
+        // Conta o tempo real entre duas conferências, não um passo fixo
+        assertEquals(5_130L, avancarOlhar(olhado, olhando = true, passoMs = 130))
     }
 
     @Test
-    fun segundosQueFaltam() {
-        assertEquals(10, segundosRestantes(0f))
-        assertEquals(5, segundosRestantes(0.5f))
-        assertEquals(0, segundosRestantes(1f))
+    fun alarmePede20MinutosETeste30Segundos() {
+        assertEquals(20 * 60_000L, metaOlhar(Alarme(1, 7, 0)))
+        assertEquals(30_000L, metaOlhar(Alarme.teste()))
+    }
+
+    @Test
+    fun contagemPraZerarApareceAos3Segundos() {
+        assertNull(segundosParaZerar(0))
+        assertNull(segundosParaZerar(2_999))
+        assertEquals(17, segundosParaZerar(3_000))
+        assertEquals(17, segundosParaZerar(3_500))
+        assertEquals(16, segundosParaZerar(4_000))
+        assertEquals(1, segundosParaZerar(19_500))
+        assertEquals(0, segundosParaZerar(20_000))
+    }
+
+    @Test
+    fun bipesCadaVezMaisAltosAteZerar() {
+        assertEquals(6, BIPES_ATE_ZERAR) // aos 3, 6, 9, 12, 15 e 18 s sem olhar
+        assertTrue(BIPES_ATE_ZERAR * AVISO_SEM_OLHAR_MS < DESISTENCIA_MS)
+        val volumes = (1..BIPES_ATE_ZERAR).map(::volumeDoBipe)
+        assertEquals(0.25f, volumes.first(), 0.01f) // 12 dB abaixo do volume de alarme
+        assertEquals(1f, volumes.last(), 0.0001f)
+        // Cada um mais alto que o anterior, sempre na mesma proporção (o mesmo tanto de dB)
+        val subidas = volumes.zipWithNext { a, b -> b / a }
+        assertTrue(subidas.all { it > 1f })
+        for (subida in subidas) assertEquals(subidas.first(), subida, 0.001f)
     }
 }

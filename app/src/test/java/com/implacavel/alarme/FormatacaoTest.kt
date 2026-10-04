@@ -5,7 +5,7 @@ import org.junit.Test
 import java.time.ZoneId
 import java.time.ZonedDateTime
 
-/** Textos de hora e dia (Formatacao.kt). */
+/** Textos de hora, dias e tempo que falta (Formatacao.kt). */
 class FormatacaoTest {
     private val zona = ZoneId.of("America/Sao_Paulo")
 
@@ -30,5 +30,15 @@ class FormatacaoTest {
         assertEquals("em 9 h 12 min", tempoAte(em(9, 29, 21, 48), em(9, 30, 7, 0)))
         assertEquals("em 1 min", tempoAte(em(9, 29, 21, 48).plusSeconds(10), em(9, 29, 21, 49)))
         assertEquals("em 2 d 1 h", tempoAte(em(9, 29, 6, 0), em(10, 1, 7, 0)))
+    }
+
+    @Test
+    fun tempoQueFaltaNoAnel() {
+        assertEquals("20:00", tempoRestante(20 * 60_000L))
+        assertEquals("19:42", tempoRestante(19 * 60_000L + 41_001)) // arredonda pra cima
+        assertEquals("1:00", tempoRestante(59_001))
+        assertEquals("59 s", tempoRestante(59_000))
+        assertEquals("30 s", tempoRestante(30_000))
+        assertEquals("0 s", tempoRestante(0))
     }
 }

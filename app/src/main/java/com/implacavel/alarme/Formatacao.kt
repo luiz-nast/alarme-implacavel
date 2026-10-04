@@ -1,4 +1,4 @@
-// Textos de hora e dia mostrados na tela. Funções puras, testadas em FormatacaoTest.
+// Textos de hora, dias e tempo que falta mostrados na tela. Funções puras, testadas em FormatacaoTest.
 package com.implacavel.alarme
 
 import java.time.Duration
@@ -38,4 +38,10 @@ fun tempoAte(agora: ZonedDateTime, quando: ZonedDateTime): String {
         if (m > 0 || isEmpty()) add("$m min")
     }
     return "em " + partes.joinToString(" ")
+}
+
+/** Tempo que falta no anel da câmera, arredondando pra cima até o segundo: "19:42" a partir de 1 min, senão "28 s". */
+fun tempoRestante(ms: Long): String {
+    val s = ((ms + 999) / 1000).coerceAtLeast(0)
+    return if (s >= 60) String.format(Locale.ROOT, "%d:%02d", s / 60, s % 60) else "$s s"
 }

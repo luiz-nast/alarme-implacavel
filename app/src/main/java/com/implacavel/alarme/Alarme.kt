@@ -87,10 +87,17 @@ data class Alarme(
  * Editar o alarme, trocar a música ou abaixar o volume depois não muda nada.
  */
 data class EmAndamento(val alarme: Alarme, val desde: Long, val musica: String?, val volume: Int) {
-    /** Outro alarme disparou no meio: este continua, com a exigência maior dos dois. */
-    fun juntar(outro: Alarme) = copy(
-        alarme = alarme.copy(missao = alarme.missao || outro.missao, volumeForte = alarme.volumeForte || outro.volumeForte),
-    )
+    /**
+     * Outro alarme disparou no meio, [agora] (epoch em ms). Teste no meio de um alarme não muda nada.
+     * Alarme de verdade no meio do teste toma o lugar dele, com as regras dele (a câmera do teste pede
+     * bem menos, veja [metaOlhar]), tocando desde agora e com o volume de antes do teste. Dois alarmes
+     * de verdade viram um: este continua, com a exigência maior dos dois.
+     */
+    fun juntar(outro: Alarme, agora: Long): EmAndamento = when {
+        outro.id == Alarme.ID_TESTE -> this
+        alarme.id == Alarme.ID_TESTE -> copy(alarme = outro, desde = agora)
+        else -> copy(alarme = alarme.copy(missao = alarme.missao || outro.missao, volumeForte = alarme.volumeForte || outro.volumeForte))
+    }
 
     /** Volume de alarme travado enquanto toca, numa escala até [maximo]: 50% no teste, 70% no volume forte, senão o de antes. */
     fun volumeTravado(maximo: Int): Int = when {

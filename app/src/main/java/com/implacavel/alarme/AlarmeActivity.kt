@@ -154,7 +154,8 @@ private fun TelaAlarme(alarme: Alarme) {
                     !desbloqueado -> EtapaDesbloquear()
                     !silenciado -> EtapaFalar(onStop = { AlarmeService.silenciar(ctx) })
                     else -> EtapaOlhar(
-                        onOlhando = { AlarmeService.olhando(ctx) },
+                        metaMs = metaOlhar(alarme),
+                        onOlhando = { AlarmeService.olhando(ctx, it) },
                         onConcluiu = { AlarmeService.missaoCumprida(ctx) },
                     )
                 }

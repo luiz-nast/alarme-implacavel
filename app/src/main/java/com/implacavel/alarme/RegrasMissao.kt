@@ -4,18 +4,34 @@ package com.implacavel.alarme
 import java.text.Normalizer
 import kotlin.math.abs
 import kotlin.math.ceil
+import kotlin.math.pow
 
 /** Tempo olhando pra câmera, de olhos abertos, pra desligar o alarme. */
-const val META_OLHAR_MS = 10_000L
+const val META_OLHAR_MS = 20 * 60_000L
+
+/** No botão "Testar agora" a câmera pede só isto: teste tem que ser rápido. */
+const val META_OLHAR_TESTE_MS = 30_000L
+
+/**
+ * Sem olhar pra câmera por esse tempo, aparece na tela quanto falta pra zerar e toca um bipe; depois,
+ * a cada mais esse tempo, um bipe mais alto.
+ */
+const val AVISO_SEM_OLHAR_MS = 3_000L
 
 /**
  * Sem sinal de que a pessoa está olhando pra câmera por esse tempo (inclusive com a tela do alarme
- * fechada), a vigia do AlarmeService volta a tocar a música e a missão recomeça.
+ * fechada), a vigia do AlarmeService volta a tocar a música e a missão recomeça, com o anel zerado.
  */
 const val DESISTENCIA_MS = 20_000L
 
+/** Bipes antes de zerar: um a cada [AVISO_SEM_OLHAR_MS], todos antes de [DESISTENCIA_MS] (aos 3, 6 … 18 s). */
+val BIPES_ATE_ZERAR = ((DESISTENCIA_MS - 1) / AVISO_SEM_OLHAR_MS).toInt()
+
 /** O que a câmera está vendo agora. */
 enum class Leitura { SEM_CAMERA, SEM_ROSTO, DE_LADO, OLHOS_FECHADOS, OLHANDO }
+
+/** Quanto tempo de olhos abertos a missão do [alarme] pede. */
+fun metaOlhar(alarme: Alarme): Long = if (alarme.id == Alarme.ID_TESTE) META_OLHAR_TESTE_MS else META_OLHAR_MS
 
 /** Aceita "stop" e jeitos de falar ou transcrever com sotaque ("estop", "istópi", "stopi"). */
 fun disseStop(texto: String): Boolean {
@@ -31,10 +47,23 @@ fun classificarRosto(giroLateral: Float, giroVertical: Float, olhoEsquerdo: Floa
 }
 
 /**
- * Progresso de 0 a 1 do anel da câmera depois de [passoMs]: só sobe com a [leitura] do quadro atual
- * em OLHANDO. Com qualquer outra (olhos fechados, de lado, sem rosto), para na hora e nunca desce.
+ * Tempo de olhos abertos acumulado no anel da câmera, depois de [passoMs] (o tempo real desde a
+ * última conferência): só sobe se a pessoa está [olhando] agora. Sem isso, para na hora e nunca desce.
  */
-fun avancarOlhar(progresso: Float, leitura: Leitura, passoMs: Long): Float =
-    if (leitura == Leitura.OLHANDO) (progresso + passoMs.toFloat() / META_OLHAR_MS).coerceAtMost(1f) else progresso
+fun avancarOlhar(olhadoMs: Long, olhando: Boolean, passoMs: Long): Long = if (olhando) olhadoMs + passoMs else olhadoMs
 
-fun segundosRestantes(progresso: Float): Int = ceil((1 - progresso) * META_OLHAR_MS / 1000.0).toInt()
+/** Contagem na tela: depois de [AVISO_SEM_OLHAR_MS] sem olhar, os segundos que faltam pro anel zerar; antes, null. */
+fun segundosParaZerar(semOlharMs: Long): Int? =
+    if (semOlharMs < AVISO_SEM_OLHAR_MS) null else ceil((DESISTENCIA_MS - semOlharMs) / 1000.0).toInt().coerceAtLeast(0)
+
+/** O primeiro bipe toca esse tanto abaixo do volume de alarme. */
+private const val DB_PRIMEIRO_BIPE = -12f
+
+/**
+ * Volume do bipe número [n] (1 = o primeiro), de 0 a 1 do volume de alarme: do primeiro, a
+ * [DB_PRIMEIRO_BIPE], ao último, no máximo, subindo por igual em decibéis (como o ouvido sente).
+ */
+fun volumeDoBipe(n: Int): Float {
+    val db = DB_PRIMEIRO_BIPE * (BIPES_ATE_ZERAR - n.coerceIn(1, BIPES_ATE_ZERAR)) / (BIPES_ATE_ZERAR - 1)
+    return 10f.pow(db / 20)
+}
