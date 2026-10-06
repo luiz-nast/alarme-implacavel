@@ -87,7 +87,7 @@ fun EditorAlarme(
                 )
                 Spacer(Modifier.height(8.dp))
                 LinhaSwitch("Missão pra desligar", "Dizer STOP e olhar 20 min pra câmera de olhos abertos", missao) { missao = it }
-                LinhaSwitch("Volume forte", "Toca a 70% do volume. Desligado, no volume atual. Nos dois casos, não dá pra abaixar", volumeForte) {
+                LinhaSwitch("Volume forte", "Toca a 50% do volume. Desligado, no volume atual. Nos dois casos, não dá pra abaixar", volumeForte) {
                     volumeForte = it
                 }
                 Spacer(Modifier.height(12.dp))

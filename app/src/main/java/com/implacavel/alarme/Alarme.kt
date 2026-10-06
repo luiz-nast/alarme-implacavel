@@ -5,11 +5,11 @@ import org.json.JSONObject
 import java.time.ZonedDateTime
 import kotlin.math.roundToInt
 
-/** Volume forte: 70% do volume de alarme do celular. */
-const val VOLUME_FORTE = 0.7f
+/** Volume forte: 50% do volume de alarme do celular. */
+const val VOLUME_FORTE = 0.5f
 
-/** O botão "Testar agora" toca a 50% do volume de alarme. */
-const val VOLUME_TESTE = 0.5f
+/** O botão "Testar agora" toca a 35% do volume de alarme. */
+const val VOLUME_TESTE = 0.35f
 
 /**
  * Um alarme salvo pelo usuário, com as regras de quando ele toca (e, no fim do arquivo, o
@@ -99,7 +99,7 @@ data class EmAndamento(val alarme: Alarme, val desde: Long, val musica: String?,
         else -> copy(alarme = alarme.copy(missao = alarme.missao || outro.missao, volumeForte = alarme.volumeForte || outro.volumeForte))
     }
 
-    /** Volume de alarme travado enquanto toca, numa escala até [maximo]: 50% no teste, 70% no volume forte, senão o de antes. */
+    /** Volume de alarme travado enquanto toca, numa escala até [maximo]: 35% no teste, 50% no volume forte, senão o de antes. */
     fun volumeTravado(maximo: Int): Int = when {
         alarme.id == Alarme.ID_TESTE -> (maximo * VOLUME_TESTE).roundToInt()
         alarme.volumeForte -> (maximo * VOLUME_FORTE).roundToInt()

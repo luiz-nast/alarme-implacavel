@@ -84,7 +84,7 @@ class AlarmeTest {
         val junto = teste.juntar(Alarme(5, 7, 0), agora = 99)
         assertEquals(EmAndamento(Alarme(5, 7, 0), desde = 99, musica = "content://musica/1", volume = 3), junto)
         assertEquals(META_OLHAR_MS, metaOlhar(junto.alarme)) // 20 min, não os 30 s do teste
-        assertEquals(11, junto.volumeTravado(maximo = 15)) // 70%, não os 50% do teste
+        assertEquals(8, junto.volumeTravado(maximo = 15)) // 50%, não os 35% do teste
         // Com as regras dele: alarme sem missão continua sem missão
         assertFalse(teste.juntar(Alarme(6, 7, 0, missao = false), agora = 99).alarme.missao)
         // O contrário: o teste no meio do alarme de verdade não muda nada
@@ -96,8 +96,8 @@ class AlarmeTest {
     fun volumeTravadoNoTesteNoForteENoNormal() {
         val normal = EmAndamento(Alarme(1, 7, 0, volumeForte = false), desde = 0, musica = null, volume = 4)
         assertEquals(4, normal.volumeTravado(maximo = 15)) // o volume de antes do alarme
-        assertEquals(11, normal.juntar(Alarme(2, 7, 0, volumeForte = true), agora = 0).volumeTravado(maximo = 15)) // 70% de 15
-        assertEquals(8, EmAndamento(Alarme.teste(), desde = 0, musica = null, volume = 3).volumeTravado(maximo = 15)) // 50% de 15
+        assertEquals(8, normal.juntar(Alarme(2, 7, 0, volumeForte = true), agora = 0).volumeTravado(maximo = 15)) // 50% de 15 (7,5)
+        assertEquals(5, EmAndamento(Alarme.teste(), desde = 0, musica = null, volume = 3).volumeTravado(maximo = 15)) // 35% de 15 (5,25)
     }
 
     @Test
