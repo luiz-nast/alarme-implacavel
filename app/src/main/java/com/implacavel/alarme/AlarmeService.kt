@@ -30,7 +30,7 @@ import java.time.LocalTime
  * único fim do alarme ([concluir]). Controla a [Sirene] e a notificação que abre a
  * [AlarmeActivity] em tela cheia, e não deixa ninguém fugir:
  * - tela do alarme fechada (Home, arrastar o app, apagar a tela): em [TELA_FECHADA_MS] a música
- *   volta e a tela reabre;
+ *   volta e a tela reabre; o anel da câmera fica onde estava;
  * - depois do "stop", a música só fica calada enquanto a câmera avisa ("olhando") que a pessoa
  *   olha; sem aviso, a vigia bipa a cada [AVISO_SEM_OLHAR_MS], cada vez mais alto, e em
  *   [DESISTENCIA_MS] religa a música (o anel zera);
@@ -95,8 +95,9 @@ class AlarmeService : Service() {
         private val _olhado = MutableStateFlow(0L)
 
         /**
-         * Tempo de olhos abertos já somado no anel nesta rodada da câmera, em ms. Só muda com a música
-         * calada e zera quando ela volta: cada rodada começa do zero, e a tela recriada no meio continua daqui.
+         * Tempo de olhos abertos já somado no anel da câmera, em ms. Só sobe com a música calada e só
+         * zera nos [DESISTENCIA_MS] sem olhar (e no fim do alarme). Sair da tela traz a música de
+         * volta, mas o anel fica: depois do "stop", a câmera continua daqui, e a tela recriada no meio também.
          */
         val olhado: StateFlow<Long> = _olhado.asStateFlow()
 
@@ -158,7 +159,7 @@ class AlarmeService : Service() {
 
     /**
      * Vigia da missão, com a música calada: a cada [AVISO_SEM_OLHAR_MS] sem sinal de que a pessoa
-     * olha, um bipe mais alto que o anterior; em [DESISTENCIA_MS], a música volta e a missão recomeça.
+     * olha, um bipe mais alto que o anterior; em [DESISTENCIA_MS], o anel zera e a música volta.
      */
     private val vigia = object : Runnable {
         override fun run() {
@@ -170,16 +171,20 @@ class AlarmeService : Service() {
                 handler.postDelayed(this, if (bipes < BIPES_ATE_ZERAR) AVISO_SEM_OLHAR_MS else DESISTENCIA_MS - bipes * AVISO_SEM_OLHAR_MS)
                 return
             }
-            Log.i(TAG, "Missão: ${DESISTENCIA_MS / 1000} s sem olhar pra câmera, música volta e o anel zera")
+            Log.i(TAG, "Missão: ${DESISTENCIA_MS / 1000} s sem olhar pra câmera, anel zera (estava em ${_olhado.value / 1000} s) e a música volta")
+            _olhado.value = 0
             religarMusica()
             _tocando.value?.let { mostrarNotificacao(it) } // alerta de novo
         }
     }
 
-    /** A tela do alarme sumiu e não voltou: música de volta e tela reaberta por uma nova notificação em tela cheia. */
+    /**
+     * A tela do alarme sumiu e não voltou: música de volta e tela reaberta por uma nova notificação em
+     * tela cheia. O anel da câmera fica onde estava (com 20 min, uma ligação custaria tudo).
+     */
     private val chamarDeVolta = Runnable {
         val alarme = _tocando.value ?: return@Runnable
-        Log.i(TAG, "Tela do alarme fechada: música volta e a tela reabre")
+        Log.i(TAG, "Tela do alarme fechada: música volta e a tela reabre (anel guardado em ${_olhado.value / 1000} s)")
         religarMusica()
         notificacoes().notify(Notificacoes.ID_CHAMADA, criarNotificacao(alarme))
     }
@@ -299,12 +304,11 @@ class AlarmeService : Service() {
         handler.postDelayed(vigia, AVISO_SEM_OLHAR_MS)
     }
 
-    /** Música de volta no volume cheio; se estava calada, a missão volta pra etapa de falar, com o anel zerado. */
+    /** Música de volta no volume cheio; se estava calada, a missão volta pra etapa de falar. O anel não muda aqui. */
     private fun religarMusica() {
         handler.removeCallbacks(vigia)
         if (_silenciado.value) {
             _silenciado.value = false
-            _olhado.value = 0
             sirene.tocar()
         } else {
             sirene.volume(1f)

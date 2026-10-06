@@ -2,8 +2,9 @@
 // 1) FALAR: dizer "stop" (a música para); 2) OLHAR: olhar pra câmera de olhos abertos até fechar o anel
 // (20 min; 30 s no botão de teste). Enquanto a pessoa olha, a etapa 2 avisa o AlarmeService a cada
 // segundo. Sem aviso, a vigia do serviço bipa a cada AVISO_SEM_OLHAR_MS, cada vez mais alto (a tela
-// mostra quanto falta pra zerar), e em DESISTENCIA_MS (não olhou, ou fechou a tela) religa a música:
-// a missão volta pra etapa 1, com o anel zerado.
+// mostra quanto falta pra zerar), e em DESISTENCIA_MS zera o anel e religa a música: a missão volta
+// pra etapa 1. Fechar a tela também traz a música de volta, mas o anel fica: depois do "stop", a
+// câmera continua de onde parou.
 // Logo depois de o celular reiniciar, antes do primeiro desbloqueio, vem antes a etapa DESBLOQUEAR.
 package com.implacavel.alarme
 
@@ -47,6 +48,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 
 /** Na etapa de falar a música alterna: alta pra acordar, baixa pra voz se destacar no microfone. */
@@ -89,12 +91,14 @@ fun EtapaDesbloquear() {
 
 /**
  * Etapa 1: ouvir "stop". Sem reconhecimento de voz disponível, aparece um botão no lugar; ele só
- * cala a música e passa pra etapa da câmera, que continua obrigatória.
+ * cala a música e passa pra etapa da câmera, que continua obrigatória. Se a pessoa já tinha olhado
+ * um tanto (e saiu da tela), mostra quanto falta dos [metaMs]: o anel continua de onde parou.
  */
 @Composable
-fun EtapaFalar(onStop: () -> Unit) {
+fun EtapaFalar(metaMs: Long, onStop: () -> Unit) {
     val ctx = LocalContext.current
     val aoDizerStop by rememberUpdatedState(onStop)
+    val olhado by AlarmeService.olhado.collectAsStateWithLifecycle()
     var ouvido by remember { mutableStateOf("") }
     var semVoz by remember { mutableStateOf(false) }
     var janelaDeEscuta by remember { mutableStateOf(false) }
@@ -130,6 +134,10 @@ fun EtapaFalar(onStop: () -> Unit) {
             textAlign = TextAlign.Center,
             maxLines = 2,
         )
+        if (olhado > 0) {
+            Spacer(Modifier.height(8.dp))
+            Text("Anel guardado: faltam ${tempoRestante(metaMs - olhado)}", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        }
         if (semVoz) {
             Spacer(Modifier.height(12.dp))
             Text("Reconhecimento de voz indisponível", color = Color.White, fontSize = 14.sp)
@@ -170,8 +178,8 @@ fun EtapaOlhar(metaMs: Long, onOlhando: (olhadoMs: Long) -> Unit, onConcluiu: ()
     val concluir by rememberUpdatedState(onConcluiu)
     // A meta pode subir no meio: alarme de verdade disparando durante o teste (EmAndamento.juntar)
     val meta by rememberUpdatedState(metaMs)
-    // Continua do que o serviço guardou (tela recriada no meio, ex.: o modo escuro do sistema mudou);
-    // rodada nova vem zerada de lá
+    // Continua do que o serviço guardou: voltou depois de sair da tela, ou a tela foi recriada no meio
+    // (ex.: o modo escuro do sistema mudou). Lá ele só zera nos 20 s sem olhar
     var olhadoMs by remember { mutableLongStateOf(AlarmeService.olhado.value) }
     var zeraEm by remember { mutableStateOf<Int?>(null) }
     LaunchedEffect(Unit) {

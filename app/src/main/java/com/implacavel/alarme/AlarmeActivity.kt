@@ -152,7 +152,7 @@ private fun TelaAlarme(alarme: Alarme) {
                     !alarme.missao -> BotaoGrande("DESLIGAR", { AlarmeService.desligar(ctx) })
                     // Logo depois de o celular reiniciar, a voz do Google só roda depois do primeiro desbloqueio
                     !desbloqueado -> EtapaDesbloquear()
-                    !silenciado -> EtapaFalar(onStop = { AlarmeService.silenciar(ctx) })
+                    !silenciado -> EtapaFalar(metaMs = metaOlhar(alarme), onStop = { AlarmeService.silenciar(ctx) })
                     else -> EtapaOlhar(
                         metaMs = metaOlhar(alarme),
                         onOlhando = { AlarmeService.olhando(ctx, it) },

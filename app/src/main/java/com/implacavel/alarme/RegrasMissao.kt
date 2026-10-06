@@ -19,8 +19,8 @@ const val META_OLHAR_TESTE_MS = 30_000L
 const val AVISO_SEM_OLHAR_MS = 3_000L
 
 /**
- * Sem sinal de que a pessoa está olhando pra câmera por esse tempo (inclusive com a tela do alarme
- * fechada), a vigia do AlarmeService volta a tocar a música e a missão recomeça, com o anel zerado.
+ * Sem sinal de que a pessoa está olhando pra câmera por esse tempo, a vigia do AlarmeService zera o
+ * anel e volta a tocar a música: a missão recomeça. Fechar a tela traz a música de volta, mas não zera.
  */
 const val DESISTENCIA_MS = 20_000L
 
