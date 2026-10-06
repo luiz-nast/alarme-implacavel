@@ -71,15 +71,12 @@ class MissaoTest {
     }
 
     @Test
-    fun bipesCadaVezMaisAltosAteZerar() {
+    fun bipesSobemDoLevinhoAoMaximoDoCelular() {
         assertEquals(6, BIPES_ATE_ZERAR) // aos 3, 6, 9, 12, 15 e 18 s sem olhar
         assertTrue(BIPES_ATE_ZERAR * AVISO_SEM_OLHAR_MS < DESISTENCIA_MS)
-        val volumes = (1..BIPES_ATE_ZERAR).map(::volumeDoBipe)
-        assertEquals(0.25f, volumes.first(), 0.01f) // 12 dB abaixo do volume de alarme
-        assertEquals(1f, volumes.last(), 0.0001f)
-        // Cada um mais alto que o anterior, sempre na mesma proporção (o mesmo tanto de dB)
-        val subidas = volumes.zipWithNext { a, b -> b / a }
-        assertTrue(subidas.all { it > 1f })
-        for (subida in subidas) assertEquals(subidas.first(), subida, 0.001f)
+        // Celular com 15 degraus de volume de alarme, como o Galaxy S24 FE: 20% … 100%
+        assertEquals(listOf(3, 5, 8, 10, 13, 15), (1..BIPES_ATE_ZERAR).map { volumeDoBipe(it, 15) })
+        assertEquals(listOf(1, 2, 4, 5, 6, 7), (1..BIPES_ATE_ZERAR).map { volumeDoBipe(it, 7) })
+        assertEquals(1, volumeDoBipe(1, 2)) // nunca mudo
     }
 }

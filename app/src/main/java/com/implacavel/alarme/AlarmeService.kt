@@ -32,8 +32,8 @@ import java.time.LocalTime
  * - tela do alarme fechada (Home, arrastar o app, apagar a tela): em [TELA_FECHADA_MS] a música
  *   volta e a tela reabre; o anel da câmera fica onde estava;
  * - depois do "stop", a música só fica calada enquanto a câmera avisa ("olhando") que a pessoa
- *   olha; sem aviso, a vigia bipa a cada [AVISO_SEM_OLHAR_MS], cada vez mais alto, e em
- *   [DESISTENCIA_MS] religa a música (o anel zera);
+ *   olha; sem aviso, a vigia bipa a cada [AVISO_SEM_OLHAR_MS], cada vez mais alto (o último, no
+ *   volume máximo do celular), e em [DESISTENCIA_MS] religa a música (o anel zera);
  * - a cada [RENOVAR_MS], empurra pra frente a retomada no AlarmManager: se o app cair, travar ou
  *   for encerrado, ou se o celular desligar, o alarme volta sozinho;
  * - se o app caiu [LIMITE_QUEDAS] vezes neste alarme, é defeito, não truque: ele volta com o
@@ -166,7 +166,7 @@ class AlarmeService : Service() {
             if (bipes < BIPES_ATE_ZERAR) {
                 bipes++
                 Log.i(TAG, "Missão: ${bipes * AVISO_SEM_OLHAR_MS / 1000} s sem olhar pra câmera, bipe $bipes")
-                sirene.bipe(volumeDoBipe(bipes))
+                sirene.bipe(bipes)
                 // O próximo bipe; depois do último, o resto do tempo até zerar
                 handler.postDelayed(this, if (bipes < BIPES_ATE_ZERAR) AVISO_SEM_OLHAR_MS else DESISTENCIA_MS - bipes * AVISO_SEM_OLHAR_MS)
                 return
@@ -249,7 +249,7 @@ class AlarmeService : Service() {
         val jaTocava = _tocando.value != null
         _tocando.value = alarme
         mostrarNotificacao(alarme)
-        sirene.preparar(em)
+        sirene.preparar(em, comeco = !jaTocava)
         // Retomada à toa, ou outro alarme disparou no meio (a foto já juntou os dois): segue de onde está
         if (jaTocava) return
         Log.i(TAG, "Serviço: tocando \"${alarme.nome}\" (missão=${alarme.missao}, volume forte=${alarme.volumeForte}, quedas=$quedas)")

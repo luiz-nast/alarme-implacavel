@@ -148,13 +148,14 @@ private fun TelaAlarme(alarme: Alarme) {
             }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Spacer(Modifier.height(16.dp))
+                val meta = metaOlhar(alarme)
                 when {
                     !alarme.missao -> BotaoGrande("DESLIGAR", { AlarmeService.desligar(ctx) })
                     // Logo depois de o celular reiniciar, a voz do Google só roda depois do primeiro desbloqueio
                     !desbloqueado -> EtapaDesbloquear()
-                    !silenciado -> EtapaFalar(metaMs = metaOlhar(alarme), onStop = { AlarmeService.silenciar(ctx) })
+                    !silenciado -> EtapaFalar(meta, onStop = { AlarmeService.silenciar(ctx) })
                     else -> EtapaOlhar(
-                        metaMs = metaOlhar(alarme),
+                        metaMs = meta,
                         onOlhando = { AlarmeService.olhando(ctx, it) },
                         onConcluiu = { AlarmeService.missaoCumprida(ctx) },
                     )

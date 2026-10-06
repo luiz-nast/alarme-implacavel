@@ -4,7 +4,7 @@ package com.implacavel.alarme
 import java.text.Normalizer
 import kotlin.math.abs
 import kotlin.math.ceil
-import kotlin.math.pow
+import kotlin.math.roundToInt
 
 /** Tempo olhando pra câmera, de olhos abertos, pra desligar o alarme. */
 const val META_OLHAR_MS = 20 * 60_000L
@@ -14,7 +14,7 @@ const val META_OLHAR_TESTE_MS = 30_000L
 
 /**
  * Sem olhar pra câmera por esse tempo, aparece na tela quanto falta pra zerar e toca um bipe; depois,
- * a cada mais esse tempo, um bipe mais alto.
+ * a cada mais esse tempo, um bipe mais alto ([volumeDoBipe]).
  */
 const val AVISO_SEM_OLHAR_MS = 3_000L
 
@@ -31,7 +31,7 @@ val BIPES_ATE_ZERAR = ((DESISTENCIA_MS - 1) / AVISO_SEM_OLHAR_MS).toInt()
 enum class Leitura { SEM_CAMERA, SEM_ROSTO, DE_LADO, OLHOS_FECHADOS, OLHANDO }
 
 /** Quanto tempo de olhos abertos a missão do [alarme] pede. */
-fun metaOlhar(alarme: Alarme): Long = if (alarme.id == Alarme.ID_TESTE) META_OLHAR_TESTE_MS else META_OLHAR_MS
+fun metaOlhar(alarme: Alarme): Long = if (alarme.deTeste) META_OLHAR_TESTE_MS else META_OLHAR_MS
 
 /** Aceita "stop" e jeitos de falar ou transcrever com sotaque ("estop", "istópi", "stopi"). */
 fun disseStop(texto: String): Boolean {
@@ -56,14 +56,10 @@ fun avancarOlhar(olhadoMs: Long, olhando: Boolean, passoMs: Long): Long = if (ol
 fun segundosParaZerar(semOlharMs: Long): Int? =
     if (semOlharMs < AVISO_SEM_OLHAR_MS) null else ceil((DESISTENCIA_MS - semOlharMs) / 1000.0).toInt().coerceAtLeast(0)
 
-/** O primeiro bipe toca esse tanto abaixo do volume de alarme. */
-private const val DB_PRIMEIRO_BIPE = -12f
-
 /**
- * Volume do bipe número [n] (1 = o primeiro), de 0 a 1 do volume de alarme: do primeiro, a
- * [DB_PRIMEIRO_BIPE], ao último, no máximo, subindo por igual em decibéis (como o ouvido sente).
+ * Volume de alarme do celular no bipe número [n] (1 = o primeiro), num celular com [maximo] degraus:
+ * sobe por igual a cada bipe, do levinho (1/6 do máximo) ao último, no máximo. Os degraus do Android
+ * já seguem o ouvido (cada um, uns dB a mais), e o bipe passa por cima da trava do volume do alarme.
  */
-fun volumeDoBipe(n: Int): Float {
-    val db = DB_PRIMEIRO_BIPE * (BIPES_ATE_ZERAR - n.coerceIn(1, BIPES_ATE_ZERAR)) / (BIPES_ATE_ZERAR - 1)
-    return 10f.pow(db / 20)
-}
+fun volumeDoBipe(n: Int, maximo: Int): Int =
+    (maximo * n.coerceIn(1, BIPES_ATE_ZERAR).toFloat() / BIPES_ATE_ZERAR).roundToInt().coerceAtLeast(1)

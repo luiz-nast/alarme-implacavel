@@ -1,4 +1,4 @@
-// Aparência compartilhada pelas telas: tema claro/escuro, cores fixas da tela do alarme e o relógio agoraACada.
+// Compartilhado pelas telas: tema claro/escuro, cores fixas da tela do alarme, o relógio agoraACada e lidoAoVoltar.
 package com.implacavel.alarme
 
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -10,8 +10,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import kotlinx.coroutines.delay
 import java.time.ZonedDateTime
 
@@ -82,4 +84,20 @@ fun agoraACada(intervaloMs: Long): ZonedDateTime {
         }
     }
     return agora
+}
+
+/**
+ * O que [ler] devolve, lido de novo toda vez que a tela volta pro primeiro plano (depois do diálogo de
+ * permissão do sistema ou de voltar das Configurações) e quando [chave] muda: permissões da tela
+ * principal, câmera do alarme.
+ */
+@Composable
+fun <T> lidoAoVoltar(chave: Any? = Unit, ler: () -> T): T {
+    val lerAgora by rememberUpdatedState(ler)
+    var valor by remember { mutableStateOf(ler()) }
+    LifecycleResumeEffect(chave) {
+        valor = lerAgora()
+        onPauseOrDispose { }
+    }
+    return valor
 }

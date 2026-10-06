@@ -33,7 +33,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.ZonedDateTime
 
@@ -59,12 +58,8 @@ private fun TelaPrincipal() {
     val agora = agoraACada(15_000) // pros textos "toca em 9 h 12 min"
     var editando by remember { mutableStateOf<Alarme?>(null) }
 
-    // Permissões: relidas toda vez que a tela volta (ex.: depois de liberar algo nas Configurações)
-    var poderes by remember { mutableStateOf(lerPoderes(ctx)) }
-    LifecycleResumeEffect(Unit) {
-        poderes = lerPoderes(ctx)
-        onPauseOrDispose { }
-    }
+    // Permissões: relidas toda vez que a tela volta (do diálogo do sistema ou das Configurações)
+    val poderes = lidoAoVoltar { Poder.entries.associateWith { it.liberado(ctx) } }
 
     // Permissões com diálogo do sistema (notificação, microfone, câmera). Se o usuário já negou, o
     // sistema não pergunta de novo; aí, se o pedido veio de um botão "Liberar", abre as Configurações.
@@ -72,7 +67,6 @@ private fun TelaPrincipal() {
     val pedirPermissao = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         pedidoDoBotao?.let { if (!ok) it.abrirConfiguracao(ctx) }
         pedidoDoBotao = null
-        poderes = lerPoderes(ctx)
     }
     LaunchedEffect(Unit) { Poder.NOTIFICACOES.permissaoFaltando(ctx)?.let { pedirPermissao.launch(it) } }
     val liberar: (Poder) -> Unit = { poder ->
@@ -171,8 +165,6 @@ private fun TelaPrincipal() {
         )
     }
 }
-
-private fun lerPoderes(ctx: Context) = Poder.entries.associateWith { it.liberado(ctx) }
 
 private fun salvarEAgendar(ctx: Context, alarme: Alarme) {
     Alarmes.salvar(alarme)

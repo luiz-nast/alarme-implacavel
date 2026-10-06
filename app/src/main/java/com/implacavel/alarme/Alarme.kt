@@ -37,6 +37,9 @@ data class Alarme(
     /** Nome pra mostrar: o rótulo, ou "Alarme" se ele estiver em branco. */
     val nome: String get() = rotulo.ifBlank { "Alarme" }
 
+    /** O alarme do botão "Testar agora" ([ID_TESTE]): toca mais baixo e pede menos da câmera. */
+    val deTeste: Boolean get() = id == ID_TESTE
+
     /** Próximo horário que bate com hora, minuto e dias, estritamente depois de [agora]. */
     fun proximoDisparo(agora: ZonedDateTime): ZonedDateTime {
         var alvo = agora.withHour(hora).withMinute(minuto).withSecond(0).withNano(0)
@@ -94,14 +97,14 @@ data class EmAndamento(val alarme: Alarme, val desde: Long, val musica: String?,
      * de verdade viram um: este continua, com a exigência maior dos dois.
      */
     fun juntar(outro: Alarme, agora: Long): EmAndamento = when {
-        outro.id == Alarme.ID_TESTE -> this
-        alarme.id == Alarme.ID_TESTE -> copy(alarme = outro, desde = agora)
+        outro.deTeste -> this
+        alarme.deTeste -> copy(alarme = outro, desde = agora)
         else -> copy(alarme = alarme.copy(missao = alarme.missao || outro.missao, volumeForte = alarme.volumeForte || outro.volumeForte))
     }
 
     /** Volume de alarme travado enquanto toca, numa escala até [maximo]: 35% no teste, 50% no volume forte, senão o de antes. */
     fun volumeTravado(maximo: Int): Int = when {
-        alarme.id == Alarme.ID_TESTE -> (maximo * VOLUME_TESTE).roundToInt()
+        alarme.deTeste -> (maximo * VOLUME_TESTE).roundToInt()
         alarme.volumeForte -> (maximo * VOLUME_FORTE).roundToInt()
         else -> volume
     }
