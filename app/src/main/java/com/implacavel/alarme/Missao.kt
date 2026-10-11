@@ -67,8 +67,12 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -79,6 +83,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.roundToInt
 
 /** Na etapa de falar a música alterna: alta pra acordar, baixa pra voz se destacar no microfone. */
 private const val MUSICA_ALTA_MS = 5_000L
@@ -91,7 +97,7 @@ private const val PASSO_MS = 100L
 private const val AVISO_OLHANDO_MS = 1_000L
 
 /** Sem quadro novo da câmera por esse tempo (câmera travada), a última leitura deixa de valer. Bem mais que o intervalo da análise (CameraOlhos). */
-private const val QUADRO_VELHO_MS = 1_000L
+private const val QUADRO_VELHO_MS = 1_500L
 
 /** Páginas da etapa da câmera: o YouTube à esquerda (o dedo desliza pra direita) e a câmera, onde começa. */
 private const val PAGINA_YOUTUBE = 0
@@ -155,7 +161,7 @@ fun EtapaFalar(metaMs: Long, onStop: () -> Unit) {
         }
     }
     DisposableEffect(Unit) {
-        val ouvinte = OuvinteStop(ctx, onOuviu = { ouvido = it }, onStop = { aoDizerStop() }, onIndisponivel = { semVoz = true })
+        val ouvinte = Ouvinte(ctx, "STOP", ::disseStop, onOuviu = { ouvido = it }, onAceito = { aoDizerStop() }, onIndisponivel = { semVoz = true })
         ouvinte.comecar()
         onDispose { ouvinte.parar() }
     }
@@ -178,6 +184,87 @@ fun EtapaFalar(metaMs: Long, onStop: () -> Unit) {
             Spacer(Modifier.height(12.dp))
             AvisoComBotao("Reconhecimento de voz indisponível", "PARAR A MÚSICA", onClick = onStop)
         }
+    }
+}
+
+/**
+ * Verificação do meio da atividade ([AlarmeService.verificacao]): mostra a frase que a voz fala e, na vez
+ * da pessoa, escuta em inglês até ela repetir ([repetiu]), mostrando o que ouve e pintando de verde as
+ * palavras já ditas ([palavrasDitas]). Qualquer fala ouvida avisa o serviço, que conta o silêncio
+ * (apitos e zerar); sem reconhecimento de voz, o serviço pula a verificação.
+ */
+@Composable
+fun EtapaVerificacao(passo: Verificacao) {
+    val ctx = LocalContext.current
+    var ouvido by remember(passo.frase) { mutableStateOf("") }
+    if (passo.suaVez) {
+        DisposableEffect(passo.frase) {
+            val ouvinte = Ouvinte(
+                ctx, "frase", aceita = { repetiu(passo.frase, it) },
+                onOuviu = {
+                    ouvido = it
+                    AlarmeService.ouviu(ctx)
+                },
+                onAceito = { AlarmeService.repetiu(ctx) },
+                onIndisponivel = { AlarmeService.semVozNaVerificacao(ctx) },
+                idioma = "en-US",
+                juntar = true, // com pausa no meio da frase, as palavras já ditas continuam valendo
+            )
+            ouvinte.comecar()
+            onDispose { ouvinte.parar() }
+        }
+    }
+    val ultimaResposta by AlarmeService.ultimaResposta.collectAsStateWithLifecycle()
+    var agora by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(250)
+            agora = SystemClock.elapsedRealtime()
+        }
+    }
+    val semResposta = agora - ultimaResposta
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        val titulo = when {
+            passo.frase.isNotEmpty() -> "Repeat after me"
+            passo.numero == 0 -> "Let's verify that you are awake"
+            else -> "Thank you! You reached the middle"
+        }
+        Text(titulo, color = VinhoAlarme, fontSize = 20.sp, textAlign = TextAlign.Center)
+        if (passo.frase.isNotEmpty()) {
+            Spacer(Modifier.height(12.dp))
+            val ditas = palavrasDitas(passo.frase, ouvido)
+            // Na vez da pessoa, um cursor vermelho piscando depois da última palavra certa (antes da
+            // primeira, se nenhuma): de onde continuar. Apagado, fica transparente, pra frase não pular
+            val depoisDe = if (passo.suaVez && !ditas.all { it.second }) ditas.indexOfLast { it.second } else null
+            val cursor = AnnotatedString("|", SpanStyle(color = if (agora / 500 % 2 == 0L) VermelhoAviso else Color.Transparent, fontWeight = FontWeight.Black))
+            val frase = buildAnnotatedString {
+                append("\u201C")
+                if (depoisDe == -1) append(cursor)
+                ditas.forEachIndexed { i, (palavra, dita) ->
+                    if (i > 0) append(" ")
+                    if (dita) withStyle(SpanStyle(color = VerdeVez)) { append(palavra) } else append(palavra)
+                    if (i == depoisDe) append(cursor)
+                }
+                append("\u201D")
+            }
+            Text(frase, color = VinhoAlarme, fontSize = 28.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(8.dp))
+            // O que o reconhecedor está ouvindo, em tempo real (as últimas palavras); duas linhas sempre, pra tela não pular
+            Text(
+                if (passo.suaVez && ouvido.isNotBlank()) "Ouvi: \"${ouvido.split(" ").takeLast(12).joinToString(" ")}\"" else "",
+                color = VinhoAlarme.copy(alpha = 0.7f),
+                fontSize = 16.sp,
+                textAlign = TextAlign.Center,
+                minLines = 2,
+                maxLines = 2,
+            )
+            Text("Frase ${passo.numero} de $FRASES_POR_VERIFICACAO", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 16.sp)
+        }
+        Spacer(Modifier.height(12.dp))
+        Text(if (passo.suaVez) "🎤 Sua vez" else "", color = VerdeVez, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        // Como na câmera: sem resposta há um tempo, quanto falta pra zerar
+        val zeraEm = if (passo.suaVez && semResposta >= SILENCIO_APITO_MS) ceil((SILENCIO_ZERA_MS - semResposta) / 1000.0).toInt().coerceAtLeast(0) else null
+        Text(zeraEm?.let { "$it s pra zerar" } ?: "", color = VermelhoAviso, fontSize = 28.sp, fontWeight = FontWeight.Black)
     }
 }
 
@@ -235,6 +322,7 @@ fun EtapaOlhar(
         return
     }
     var leitura by remember { mutableStateOf(Leitura.SEM_ROSTO) }
+    var aberto by remember { mutableStateOf<Float?>(null) } // a certeza de olho aberto do último quadro
     var quandoLeu by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     if (leitura == Leitura.SEM_CAMERA) {
         // A câmera deu defeito (a permissão existe): sem como conferir os olhos, desliga no botão
@@ -249,6 +337,8 @@ fun EtapaOlhar(
     // (ex.: o tamanho da fonte do sistema mudou). Lá ele só zera nos 20 s sem olhar
     var olhadoMs by remember { mutableLongStateOf(AlarmeService.olhado.value) }
     var zeraEm by remember { mutableStateOf<Int?>(null) }
+    // Depois da verificação do meio, a câmera fica mais exigente com os olhos
+    val metadeVerificada by AlarmeService.metadeVerificada.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) {
         var antes = SystemClock.elapsedRealtime()
         var ultimoAviso = 0L
@@ -257,13 +347,19 @@ fun EtapaOlhar(
             delay(PASSO_MS)
             val agora = SystemClock.elapsedRealtime()
             // Câmera travada vale como sem rosto: imagem velha não enche o anel
-            if (agora - quandoLeu > QUADRO_VELHO_MS) leitura = Leitura.SEM_ROSTO
+            if (agora - quandoLeu > QUADRO_VELHO_MS) {
+                leitura = Leitura.SEM_ROSTO
+                aberto = null
+            }
             // Vale o quadro atual: tirou o rosto ou fechou os olhos, o anel para na hora
             val olhando = leitura == Leitura.OLHANDO
             if (olhando != olhavaAntes) {
-                Log.i(TAG, "Câmera: ${if (olhando) "olhando" else "parou de olhar ($leitura)"}, anel ${olhadoMs * 100 / meta}%")
+                val olho = aberto?.let { ", olho ${porcento(it)}%" }.orEmpty()
+                Log.i(TAG, "Câmera: ${if (olhando) "olhando" else "parou de olhar ($leitura)"}$olho, anel ${olhadoMs * 100 / meta}%")
             }
-            olhadoMs = avancarOlhar(olhadoMs, olhando, passoMs = agora - antes)
+            // Antes da verificação do meio (no serviço), o anel para na metade
+            val limite = if (AlarmeService.metadeVerificada.value) meta else meta / 2
+            olhadoMs = minOf(avancarOlhar(olhadoMs, olhando, passoMs = agora - antes), maxOf(limite, olhadoMs))
             antes = agora
             // A cada segundo olhando, e no instante em que parou: a contagem pra zerar começa daí
             if (olhando && agora - ultimoAviso >= AVISO_OLHANDO_MS || olhavaAntes && !olhando) {
@@ -285,7 +381,7 @@ fun EtapaOlhar(
     val paginas = rememberPagerState(initialPage = PAGINA_CAMERA) { 2 }
     val configuracao = LocalConfiguration.current
     val circulo = if (configuracao.screenWidthDp > configuracao.screenHeightDp) {
-        (configuracao.screenHeightDp - 190).dp.coerceIn(150.dp, CIRCULO)
+        (configuracao.screenHeightDp - 212).dp.coerceIn(150.dp, CIRCULO)
     } else {
         CIRCULO
     }
@@ -311,6 +407,9 @@ fun EtapaOlhar(
                         Spacer(Modifier.size(circulo).onGloballyPositioned { lugarDoCirculo = it.positionInRoot() })
                         Spacer(Modifier.height(16.dp))
                         Text(mensagem, color = cor, fontSize = 24.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                        // A certeza do detector de que os olhos estão abertos (100% = certeza que sim), e o mínimo pra contar
+                        val minimo = porcento(minimoOlhoAberto(metadeVerificada))
+                        Text("Olho aberto: ${aberto?.let { "${porcento(it)}%" } ?: "—"} · mínimo $minimo%", color = cor, fontSize = 16.sp)
                         Text("Mais ${tempoRestante(metaMs - olhadoMs)} de olhos abertos", color = VinhoAlarme, fontSize = 16.sp)
                         // Linha sempre presente (vazia enquanto olha), pra tela não pular quando a contagem aparece
                         Text(zeraEm?.let { "$it s pra zerar" } ?: "", color = VermelhoAviso, fontSize = 28.sp, fontWeight = FontWeight.Black)
@@ -328,8 +427,10 @@ fun EtapaOlhar(
             cor = cor,
             legenda = zeraEm?.let { "$it s pra zerar" } ?: "faltam ${tempoRestante(metaMs - olhadoMs)}",
             alerta = zeraEm != null,
-            onLeitura = {
-                leitura = it
+            exigente = metadeVerificada,
+            onLeitura = { nova, olho ->
+                leitura = nova
+                aberto = olho
                 quandoLeu = SystemClock.elapsedRealtime()
             },
         )
@@ -353,7 +454,8 @@ private fun CameraMovel(
     cor: Color,
     legenda: String,
     alerta: Boolean,
-    onLeitura: (Leitura) -> Unit,
+    exigente: Boolean,
+    onLeitura: (Leitura, olhoAberto: Float?) -> Unit,
 ) {
     val escopo = rememberCoroutineScope()
     val densidade = LocalDensity.current
@@ -444,7 +546,7 @@ private fun CameraMovel(
                 },
             contentAlignment = Alignment.Center,
         ) {
-            CameraOlhos(Modifier.size(circulo - 32.dp).clip(CircleShape), onLeitura)
+            CameraOlhos(Modifier.size(circulo - 32.dp).clip(CircleShape), exigente, onLeitura)
             AnelProgresso(progresso, cor, Modifier.fillMaxSize())
         }
         // Em cima da bolinha, o tempo que falta ou, em vermelho, a contagem pra zerar (só na página do YouTube)
@@ -538,7 +640,10 @@ private fun AnelProgresso(progresso: Float, cor: Color, modifier: Modifier) {
     }
 }
 
+private fun porcento(fracao: Float) = (fracao * 100).roundToInt()
+
 private val VermelhoAviso = Color(0xFFC62828)
+private val VerdeVez = Color(0xFF2E7D32)
 
 /** O retorno visual de cada leitura da câmera: cor (verde ou vermelho) e mensagem. */
 private fun retorno(leitura: Leitura): Pair<Color, String> = when (leitura) {

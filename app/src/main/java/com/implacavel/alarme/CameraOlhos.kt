@@ -3,6 +3,7 @@ package com.implacavel.alarme
 import android.os.SystemClock
 import android.util.Log
 import android.util.Range
+import android.util.Size
 import androidx.annotation.OptIn
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
@@ -11,6 +12,8 @@ import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.runtime.Composable
@@ -34,34 +37,44 @@ import com.google.mlkit.vision.face.FaceDetectorOptions
 import java.util.concurrent.Executors
 
 /**
- * O detector de rosto (modo preciso) olha um quadro a cada tanto, não todos: 4 por segundo bastam pro
- * anel parar na hora e pra contagem, e antes, em todo quadro, o celular esquentava em 5 min.
+ * O detector de rosto (modo preciso) olha um quadro a cada tanto, não todos: 2 por segundo bastam pro
+ * anel parar em meio segundo e pra contagem. Em todo quadro, o celular esquentava em 5 min; com 4 por
+ * segundo, ainda esquentava nos 40 min da atividade.
  */
-private const val ANALISE_A_CADA_MS = 250L
+private const val ANALISE_A_CADA_MS = 500L
 
 /** Quadros por segundo da câmera: a bolinha não precisa de 30, e menos quadros esquentam menos. */
 private val QUADROS_POR_SEGUNDO = Range(15, 15)
+
+/**
+ * Tamanho da imagem do círculo: perto do tamanho dele na tela, em vez do Full HD que a câmera manda
+ * sozinha (menos trabalho pro celular, menos calor). A análise já usa 640x480 por padrão.
+ */
+private val IMAGEM_DO_CIRCULO = ResolutionSelector.Builder()
+    .setResolutionStrategy(ResolutionStrategy(Size(640, 480), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
+    .build()
 
 /** Detector de rosto falhando em todo quadro analisado por uns 3 s é defeito. */
 private const val FALHAS_SEGUIDAS_MAX = (3_000 / ANALISE_A_CADA_MS).toInt()
 
 /**
  * Câmera frontal com detecção de rosto (ML Kit, roda no aparelho, sem internet). A cada quadro
- * analisado ([ANALISE_A_CADA_MS]) informa uma [Leitura]. Com defeito (não abre, erro grave da câmera
- * ou o detector falhando em todo quadro), informa [Leitura.SEM_CAMERA].
+ * analisado ([ANALISE_A_CADA_MS]) informa uma [Leitura] e o [olhoAberto] (null sem rosto). Com defeito
+ * (não abre, erro grave da câmera ou o detector falhando em todo quadro), informa [Leitura.SEM_CAMERA].
  */
 @Composable
-fun CameraOlhos(modifier: Modifier, onLeitura: (Leitura) -> Unit) {
+fun CameraOlhos(modifier: Modifier, exigente: Boolean, onLeitura: (Leitura, olhoAberto: Float?) -> Unit) {
     val ctx = LocalContext.current
     val dono = LocalLifecycleOwner.current
     val informar by rememberUpdatedState(onLeitura)
+    val exigenteAgora by rememberUpdatedState(exigente) // lido na thread da análise, a cada quadro
     val visor = remember {
         PreviewView(ctx).apply {
             scaleType = PreviewView.ScaleType.FILL_CENTER
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE // permite recortar em círculo
         }
     }
-    val preview = remember { Preview.Builder().setTargetFrameRate(QUADROS_POR_SEGUNDO).build() }
+    val preview = remember { Preview.Builder().setTargetFrameRate(QUADROS_POR_SEGUNDO).setResolutionSelector(IMAGEM_DO_CIRCULO).build() }
     val analise = remember { ImageAnalysis.Builder().setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST).build() }
     // A tela gira sem ser recriada (configChanges): sem isso, deitado, o detector veria o rosto de lado.
     // Ler a configuração faz isto rodar de novo a cada giro
@@ -92,15 +105,15 @@ fun CameraOlhos(modifier: Modifier, onLeitura: (Leitura) -> Unit) {
                     }
                     ultimaAnalise = agora
                     analisar(
-                        quadro, detector,
-                        onLeitura = {
+                        quadro, detector, { exigenteAgora },
+                        onLeitura = { leitura, aberto ->
                             falhasSeguidas = 0
-                            informar(it)
+                            informar(leitura, aberto)
                         },
                         onFalha = {
                             if (++falhasSeguidas == FALHAS_SEGUIDAS_MAX) {
                                 Log.w(TAG, "Câmera: o detector de rosto falhou $FALHAS_SEGUIDAS_MAX vezes seguidas")
-                                informar(Leitura.SEM_CAMERA)
+                                informar(Leitura.SEM_CAMERA, null)
                             }
                         },
                     )
@@ -113,7 +126,7 @@ fun CameraOlhos(modifier: Modifier, onLeitura: (Leitura) -> Unit) {
                 Log.i(TAG, "Câmera: aberta")
             }.onFailure {
                 Log.w(TAG, "Câmera: não abriu", it)
-                informar(Leitura.SEM_CAMERA)
+                informar(Leitura.SEM_CAMERA, null)
             }
         }, ContextCompat.getMainExecutor(ctx))
         onDispose {
@@ -132,28 +145,30 @@ fun CameraOlhos(modifier: Modifier, onLeitura: (Leitura) -> Unit) {
  * Câmera bloqueada no atalho de privacidade do Android é escolha, não defeito: liberando, ela volta.
  * Os erros passageiros (outro app usando a câmera) o CameraX resolve sozinho.
  */
-private fun tratarErro(erro: CameraState.StateError, onLeitura: (Leitura) -> Unit) {
+private fun tratarErro(erro: CameraState.StateError, onLeitura: (Leitura, Float?) -> Unit) {
     Log.w(TAG, "Câmera: erro ${erro.code} (${erro.type})")
-    if (erro.type == CameraState.ErrorType.CRITICAL && erro.code != CameraState.ERROR_CAMERA_DISABLED) onLeitura(Leitura.SEM_CAMERA)
+    if (erro.type == CameraState.ErrorType.CRITICAL && erro.code != CameraState.ERROR_CAMERA_DISABLED) onLeitura(Leitura.SEM_CAMERA, null)
 }
 
 @OptIn(ExperimentalGetImage::class)
-private fun analisar(quadro: ImageProxy, detector: FaceDetector, onLeitura: (Leitura) -> Unit, onFalha: () -> Unit) {
+private fun analisar(quadro: ImageProxy, detector: FaceDetector, exigente: () -> Boolean, onLeitura: (Leitura, Float?) -> Unit, onFalha: () -> Unit) {
     val imagem = quadro.image
     if (imagem == null) {
         quadro.close()
         return
     }
     detector.process(InputImage.fromMediaImage(imagem, quadro.imageInfo.rotationDegrees))
-        .addOnSuccessListener { rostos -> onLeitura(lerRosto(rostos)) }
+        .addOnSuccessListener { rostos -> lerRosto(rostos, exigente(), onLeitura) }
         .addOnFailureListener { onFalha() }
         .addOnCompleteListener { quadro.close() }
 }
 
 /** Considera só o maior rosto (o mais perto da câmera). */
-private fun lerRosto(rostos: List<Face>): Leitura {
-    val rosto = rostos.maxByOrNull { it.boundingBox.width() } ?: return Leitura.SEM_ROSTO
-    return classificarRosto(rosto.leftEyeOpenProbability, rosto.rightEyeOpenProbability)
+private fun lerRosto(rostos: List<Face>, exigente: Boolean, onLeitura: (Leitura, Float?) -> Unit) {
+    val rosto = rostos.maxByOrNull { it.boundingBox.width() } ?: return onLeitura(Leitura.SEM_ROSTO, null)
+    val esquerdo = rosto.leftEyeOpenProbability
+    val direito = rosto.rightEyeOpenProbability
+    onLeitura(classificarRosto(esquerdo, direito, exigente), olhoAberto(esquerdo, direito))
 }
 
 /**

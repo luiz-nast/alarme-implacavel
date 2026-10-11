@@ -11,21 +11,29 @@ import android.speech.SpeechRecognizer
 import android.util.Log
 
 /**
- * Escuta o microfone sem parar até ouvir "stop" (regra em [disseStop]). Usa o reconhecedor de voz do
- * sistema (no Galaxy, o do Google), de preferência offline, e recomeça sozinho depois de cada frase,
- * silêncio ou erro passageiro. Depois de [LIMITE_FALHAS] erros seguidos, ou se o reconhecedor ficar
- * [ESPERA_RESPOSTA_MS] sem dar sinal de vida (o serviço do Google caiu), avisa [onIndisponivel].
- * Tudo roda na thread principal.
+ * Escuta o microfone sem parar até ouvir o que [aceita] (o "stop", em [disseStop]; a frase da
+ * verificação, em [repetiu]). Usa o reconhecedor de voz do sistema (no Galaxy, o do Google), no
+ * [idioma] pedido (null = o do sistema), de preferência offline, e recomeça sozinho depois de cada frase,
+ * silêncio ou erro passageiro. [onOuviu] recebe tudo que ele ouve, ainda no meio da fala. Com [juntar],
+ * vale também o que ele já ouviu antes (até [PALAVRAS_JUNTAS]): a frase pode sair em pedaços, com
+ * pausa no meio. Depois de [LIMITE_FALHAS] erros seguidos (ou na hora, sem o idioma), ou se o
+ * reconhecedor ficar [ESPERA_RESPOSTA_MS] sem dar sinal de vida (o serviço do Google caiu), avisa
+ * [onIndisponivel]. Tudo roda na thread principal.
  */
-class OuvinteStop(
+class Ouvinte(
     private val ctx: Context,
+    private val nome: String,
+    private val aceita: (String) -> Boolean,
     private val onOuviu: (String) -> Unit,
-    private val onStop: () -> Unit,
+    private val onAceito: () -> Unit,
     private val onIndisponivel: () -> Unit,
+    private val idioma: String? = null,
+    private val juntar: Boolean = false,
 ) : RecognitionListener {
     private val handler = Handler(Looper.getMainLooper())
     private var reconhecedor: SpeechRecognizer? = null
     private var falhasSeguidas = 0
+    private var jaOuvido = "" // com [juntar]: as falas que já terminaram
 
     /** O reconhecedor parou de responder: vale como indisponível, pra aparecer o botão no lugar. */
     private val travou = Runnable {
@@ -59,6 +67,7 @@ class OuvinteStop(
             .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
             .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
+            .apply { idioma?.let { putExtra(RecognizerIntent.EXTRA_LANGUAGE, it) } }
         reconhecedor?.startListening(pedido)
         aguardarResposta()
     }
@@ -73,23 +82,32 @@ class OuvinteStop(
         handler.postDelayed({ escutar() }, esperaMs)
     }
 
-    private fun conferir(resultado: Bundle?) {
+    /** [terminou]: o resultado final da fala (os outros são parciais, enquanto a pessoa ainda fala). */
+    private fun conferir(resultado: Bundle?, terminou: Boolean) {
         aguardarResposta()
-        val frases = resultado?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
-        frases.firstOrNull()?.let(onOuviu)
-        if (frases.isNotEmpty()) Log.i(TAG, "Voz ouviu: $frases")
-        if (frases.any(::disseStop)) {
-            Log.i(TAG, "Voz: STOP reconhecido")
+        // Resultado sem nenhuma palavra (o reconhecedor manda "" com barulho) não é fala de ninguém
+        val frases = resultado?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty().filter { it.any(Char::isLetterOrDigit) }
+        if (frases.isEmpty()) return
+        Log.i(TAG, "Voz ouviu: $frases")
+        val ouvidas = if (juntar) frases.map { juntarAoOuvido(it) } else frases
+        onOuviu(ouvidas.first())
+        if (ouvidas.any(aceita)) {
+            Log.i(TAG, "Voz: $nome reconhecido")
             parar()
-            onStop()
+            onAceito()
+        } else if (juntar && terminou) {
+            jaOuvido = ouvidas.first()
         }
     }
 
-    override fun onPartialResults(partialResults: Bundle?) = conferir(partialResults)
+    private fun juntarAoOuvido(frase: String) =
+        "$jaOuvido $frase".split(" ").filter(String::isNotBlank).takeLast(PALAVRAS_JUNTAS).joinToString(" ")
+
+    override fun onPartialResults(partialResults: Bundle?) = conferir(partialResults, terminou = false)
 
     override fun onResults(results: Bundle?) {
         falhasSeguidas = 0
-        conferir(results)
+        conferir(results, terminou = true)
         if (reconhecedor != null) escutarDeNovo(100)
     }
 
@@ -99,7 +117,8 @@ class OuvinteStop(
         when (error) {
             // Silêncio ou fala que não virou texto: normal, só escutar de novo
             SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> falhasSeguidas = 0
-            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> falhasSeguidas = LIMITE_FALHAS
+            // Sem permissão, ou sem o idioma pedido (ex.: inglês sem internet e sem o pacote offline)
+            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS, ERRO_IDIOMA_NAO_SUPORTADO, ERRO_IDIOMA_INDISPONIVEL -> falhasSeguidas = LIMITE_FALHAS
             else -> falhasSeguidas++
         }
         Log.i(TAG, "Voz: erro $error do reconhecedor (falhas seguidas: $falhasSeguidas)")
@@ -121,6 +140,13 @@ class OuvinteStop(
 
     private companion object {
         const val LIMITE_FALHAS = 5
+
+        /** Com [juntar], só as últimas palavras ouvidas: uma TV ligada não junta palavras até formar a frase. */
+        const val PALAVRAS_JUNTAS = 20
         const val ESPERA_RESPOSTA_MS = 8_000L
+
+        // SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED e ERROR_LANGUAGE_UNAVAILABLE (Android 12+)
+        const val ERRO_IDIOMA_NAO_SUPORTADO = 12
+        const val ERRO_IDIOMA_INDISPONIVEL = 13
     }
 }

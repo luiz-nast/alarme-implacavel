@@ -28,6 +28,10 @@ fun textoDaSaudacao(agora: LocalTime): String =
 
 const val FALA_INICIO = "Activity starting now."
 
+const val FALA_VERIFICAR = "Let's verify that you are awake. Repeat the following sentences after me."
+
+const val FALA_METADE = "Thank you very much for your effort, sir. You reached the middle of the activity."
+
 const val FALA_FIM = "Congratulations, sir! The activity is done. Have a good time getting back to your activities."
 
 fun falaDosMinutos(minutos: Int) = "$minutos minutes passed."

@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
+import java.time.LocalDate
 import java.time.LocalTime
 
 /**
@@ -37,6 +38,9 @@ import java.time.LocalTime
  *   volta e a tela reabre; o anel da câmera fica onde estava;
  * - depois do "stop", a voz do celular dá bom dia, [PAUSA_DEPOIS_DA_SAUDACAO_MS] depois diz "Activity
  *   starting now", toca o bipe positivo e começa a câmera; a cada 10 min completos, a voz avisa;
+ * - na metade, o anel para e vem a verificação: a voz fala 5 frases ([frasesDoDia]) e a pessoa repete
+ *   cada uma; sem responder por [SILENCIO_APITO_MS], um apito alto, e em [SILENCIO_ZERA_MS] o anel zera e a
+ *   música volta. Depois dela, a câmera fica mais exigente com os olhos;
  *   daí a música só fica calada enquanto a câmera avisa ("olhando") que a pessoa
  *   olha; sem aviso, a vigia bipa a cada [AVISO_SEM_OLHAR_MS], cada vez mais alto (o último, no
  *   volume máximo do celular), e em [DESISTENCIA_MS] religa a música (o anel zera);
@@ -50,6 +54,9 @@ import java.time.LocalTime
  * desligar, tela, silenciar, olhando, volume e dar tempo. O comando reexibir vem da notificação
  * arrastada pro lado.
  */
+/** Um passo da verificação do meio: a [frase] da vez ([numero] de 5; vazia na fala de abertura e no agradecimento) e se é a [suaVez] de repetir. */
+data class Verificacao(val frase: String, val numero: Int, val suaVez: Boolean)
+
 class AlarmeService : Service() {
 
     companion object {
@@ -62,6 +69,9 @@ class AlarmeService : Service() {
         private const val ACAO_OLHANDO = "olhando"
         private const val ACAO_VOLUME = "volume"
         private const val ACAO_DAR_TEMPO = "dar_tempo"
+        private const val ACAO_OUVIU = "ouviu"
+        private const val ACAO_REPETIU = "repetiu"
+        private const val ACAO_SEM_VOZ = "sem_voz"
         private const val EXTRA_VOLUME = "volume"
         private const val EXTRA_ABERTA = "aberta"
         private const val EXTRA_OLHADO = "olhado"
@@ -84,6 +94,9 @@ class AlarmeService : Service() {
         /** Entre a saudação falada e o "Activity starting now". */
         private const val PAUSA_DEPOIS_DA_SAUDACAO_MS = 1_500L
 
+        /** Entre o "Let's verify..." e a primeira frase da verificação. */
+        private const val PAUSA_ANTES_DAS_FRASES_MS = 1_000L
+
         /** Se os sons do fim travarem, o alarme termina assim mesmo depois disso. */
         private const val COMEMORACAO_MAX_MS = 20_000L
 
@@ -93,7 +106,9 @@ class AlarmeService : Service() {
         /** Falas fixas, gravadas assim que a voz fica pronta: o início e os avisos de 10, 20 e 30 min. */
         private const val FALA_DO_INICIO = "inicio"
         private const val FALA_DO_FIM = "fim"
-        private val FALAS_FIXAS = mapOf(FALA_DO_INICIO to FALA_INICIO, FALA_DO_FIM to FALA_FIM) +
+        private const val FALA_DE_VERIFICAR = "verificar"
+        private const val FALA_DA_METADE = "metade"
+        private val FALAS_FIXAS = mapOf(FALA_DO_INICIO to FALA_INICIO, FALA_DO_FIM to FALA_FIM, FALA_DE_VERIFICAR to FALA_VERIFICAR, FALA_DA_METADE to FALA_METADE) +
             (1 until (META_OLHAR_MS / MARCO_MS).toInt()).associate { "minutos_${it * 10}" to falaDosMinutos(it * 10) }
 
         private val _tocando = MutableStateFlow<Alarme?>(null)
@@ -115,6 +130,21 @@ class AlarmeService : Service() {
 
         /** true = a missão foi cumprida e o app comemora (bipe leve, parabéns e o estouro) antes de fechar. */
         val comemorando: StateFlow<Boolean> = _comemorando.asStateFlow()
+
+        private val _verificacao = MutableStateFlow<Verificacao?>(null)
+
+        /** A verificação do meio em andamento (null = fora dela): a tela mostra a frase e, na vez da pessoa, escuta. */
+        val verificacao: StateFlow<Verificacao?> = _verificacao.asStateFlow()
+
+        private val _metadeVerificada = MutableStateFlow(false)
+
+        /** A verificação desta rodada já foi feita: o anel passa da metade e a câmera fica mais exigente. */
+        val metadeVerificada: StateFlow<Boolean> = _metadeVerificada.asStateFlow()
+
+        private val _ultimaResposta = MutableStateFlow(0L)
+
+        /** Quando (SystemClock.elapsedRealtime) chegou a vez ou a última fala da pessoa na verificação: a tela conta daqui o tempo pra zerar. */
+        val ultimaResposta: StateFlow<Long> = _ultimaResposta.asStateFlow()
 
         private val _ultimoOlhar = MutableStateFlow(0L)
 
@@ -169,6 +199,15 @@ class AlarmeService : Service() {
         /** A pessoa vai desbloquear o celular ou liberar a câmera: por [TEMPO_FORA_MS] a tela do alarme não reabre. */
         fun darTempo(ctx: Context) { ctx.startService(comando(ctx, ACAO_DAR_TEMPO)) }
 
+        /** Na verificação, o reconhecedor ouviu alguma fala: a pessoa está respondendo. */
+        fun ouviu(ctx: Context) { ctx.startService(comando(ctx, ACAO_OUVIU)) }
+
+        /** Na verificação, a pessoa repetiu a frase da vez. */
+        fun repetiu(ctx: Context) { ctx.startService(comando(ctx, ACAO_REPETIU)) }
+
+        /** Na verificação, o reconhecimento de voz não funciona (ex.: inglês sem internet): ela é pulada. */
+        fun semVozNaVerificacao(ctx: Context) { ctx.startService(comando(ctx, ACAO_SEM_VOZ)) }
+
         private fun comando(ctx: Context, acao: String) = Intent(ctx, AlarmeService::class.java).setAction(acao)
     }
 
@@ -181,6 +220,10 @@ class AlarmeService : Service() {
     private var foraAte = 0L // SystemClock.elapsedRealtime
     private var bipes = 0 // da vigia, desde o último sinal de "olhando"
     private var cumprido = false // depois disso, só a comemoração: nada traz a música de volta
+    private val frasesDeHoje = frasesDoDia(LocalDate.now())
+    private var apitos = 0 // da verificação, desde a última fala da pessoa
+    private var vezComecou = 0L // SystemClock.elapsedRealtime em que começou a vez da pessoa na frase atual
+    private var rodadaVerificacao = 0 // muda ao começar ou cancelar: sons atrasados de uma rodada velha não avançam a nova
     private var volumeAoFim: Int? = null // o volume de antes do alarme cumprido, devolvido ao fechar
     private val handler = Handler(Looper.getMainLooper())
 
@@ -211,7 +254,7 @@ class AlarmeService : Service() {
                 return
             }
             Log.i(TAG, "Missão: ${DESISTENCIA_MS / 1000} s sem olhar pra câmera, anel zera (estava em ${_olhado.value / 1000} s) e a música volta")
-            _olhado.value = 0
+            zerarAnel()
             religarMusica()
             _tocando.value?.let { mostrarNotificacao(it) } // alerta de novo
         }
@@ -244,17 +287,20 @@ class AlarmeService : Service() {
      */
     private fun prepararVoz() {
         if (getSystemService(UserManager::class.java).isUserUnlocked) {
-            voz = Voz(this, FALAS_FIXAS)
+            voz = Voz(this, falasFixas())
             return
         }
         esperaDesbloqueio = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context, intent: Intent) {
                 unregisterReceiver(this)
                 esperaDesbloqueio = null
-                if (voz == null) voz = Voz(this@AlarmeService, FALAS_FIXAS)
+                if (voz == null) voz = Voz(this@AlarmeService, falasFixas())
             }
         }.also { ContextCompat.registerReceiver(this, it, IntentFilter(Intent.ACTION_USER_UNLOCKED), ContextCompat.RECEIVER_NOT_EXPORTED) }
     }
+
+    /** As falas fixas mais as 5 frases de hoje da verificação. */
+    private fun falasFixas() = FALAS_FIXAS + frasesDeHoje.mapIndexed { i, frase -> "frase_$i" to frase }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -277,6 +323,14 @@ class AlarmeService : Service() {
             // Com a tela fechada não há janela de escuta: a música fica no volume cheio
             acao == ACAO_VOLUME -> if (telaAberta) sirene.volume(intent.getFloatExtra(EXTRA_VOLUME, 1f))
             acao == ACAO_DAR_TEMPO -> foraAte = SystemClock.elapsedRealtime() + TEMPO_FORA_MS
+            // Fala que não acerta a frase só segura a contagem do silêncio até o prazo da frase
+            acao == ACAO_OUVIU -> if (_verificacao.value?.suaVez == true && SystemClock.elapsedRealtime() - vezComecou < PRAZO_FRASE_MS) esperarResposta()
+            acao == ACAO_REPETIU -> repetiuFrase()
+            acao == ACAO_SEM_VOZ -> if (_verificacao.value != null && !cumprido) {
+                Log.w(TAG, "Missão: sem reconhecimento de voz, a verificação é pulada")
+                handler.removeCallbacks(silencio)
+                agradecer()
+            }
         }
         return START_NOT_STICKY
     }
@@ -294,6 +348,8 @@ class AlarmeService : Service() {
         _silenciado.value = false
         _saudando.value = false
         _comemorando.value = false
+        _verificacao.value = null
+        _metadeVerificada.value = false
         _olhado.value = 0
         _tocando.value = null
         if (processador.isHeld) processador.release()
@@ -321,12 +377,18 @@ class AlarmeService : Service() {
         _tocando.value = alarme
         mostrarNotificacao(alarme)
         sirene.preparar(em, comeco = !jaTocava)
-        // Retomada à toa, ou outro alarme disparou no meio (a foto já juntou os dois): segue de onde está
-        if (jaTocava) return
+        // Retomada à toa, ou outro alarme disparou no meio (a foto já juntou os dois): segue de onde está.
+        // Se a meta subiu (alarme de verdade no lugar do teste), a verificação da metade vale de novo
+        if (jaTocava) {
+            if (_olhado.value < metaOlhar(alarme) / 2) _metadeVerificada.value = false
+            return
+        }
         Log.i(TAG, "Serviço: tocando \"${alarme.nome}\" (missão=${alarme.missao}, remédio=${alarme.remedio}, quedas=$quedas)")
         telaAberta = true
         _silenciado.value = false
         _saudando.value = false
+        _verificacao.value = null
+        _metadeVerificada.value = false
         sirene.tocar()
         handler.post(renovar)
     }
@@ -396,16 +458,103 @@ class AlarmeService : Service() {
      * A cada 10 min completos ([marcoCompletado]), a voz avisa ("10 minutes passed").
      */
     private fun olhou(olhadoMs: Long) {
-        if (!_silenciado.value || _saudando.value || cumprido) return // sinal atrasado de uma rodada que já acabou
+        // Sinal atrasado de uma rodada que já acabou, ou de antes da verificação
+        if (!_silenciado.value || _saudando.value || _verificacao.value != null || cumprido) return
         val antes = _olhado.value
         _olhado.value = maxOf(antes, olhadoMs)
-        _tocando.value?.let { alarme ->
-            marcoCompletado(antes, _olhado.value, metaOlhar(alarme))?.let { minutos ->
-                Log.i(TAG, "Missão: $minutos min de câmera")
-                sirene.falar(voz?.fixa("minutos_$minutos"))
-            }
+        val meta = _tocando.value?.let(::metaOlhar) ?: return
+        if (!_metadeVerificada.value && _olhado.value >= meta / 2) return iniciarVerificacao()
+        marcoCompletado(antes, _olhado.value, meta)?.let { minutos ->
+            Log.i(TAG, "Missão: $minutos min de câmera")
+            sirene.falar(voz?.fixa("minutos_$minutos"))
         }
         adiarVigia()
+    }
+
+    /** O anel zerou (sem olhar, ou sem responder na verificação): a verificação da metade vale de novo. */
+    private fun zerarAnel() {
+        _olhado.value = 0
+        _metadeVerificada.value = false
+    }
+
+    /**
+     * Metade da atividade: o anel para (a tela da câmera sai), toca o bipe leve, a voz diz [FALA_VERIFICAR]
+     * e, [PAUSA_ANTES_DAS_FRASES_MS] depois, começam as frases.
+     */
+    private fun iniciarVerificacao() {
+        Log.i(TAG, "Missão: metade da atividade, verificação com ${frasesDeHoje.size} frases")
+        handler.removeCallbacks(vigia)
+        val rodada = ++rodadaVerificacao
+        _verificacao.value = Verificacao(frase = "", numero = 0, suaVez = false)
+        sirene.leve {
+            sirene.falar(voz?.fixa(FALA_DE_VERIFICAR)) {
+                if (rodada == rodadaVerificacao) handler.postDelayed({ if (rodada == rodadaVerificacao) falarFrase(0) }, PAUSA_ANTES_DAS_FRASES_MS)
+            }
+        }
+    }
+
+    /** A voz fala a frase [i] (a tela também mostra); quando termina, é a vez da pessoa repetir. */
+    private fun falarFrase(i: Int) {
+        val rodada = rodadaVerificacao
+        _verificacao.value = Verificacao(frasesDeHoje[i], numero = i + 1, suaVez = false)
+        sirene.falar(voz?.fixa("frase_$i")) {
+            if (rodada != rodadaVerificacao) return@falar
+            _verificacao.value = _verificacao.value?.copy(suaVez = true)
+            vezComecou = SystemClock.elapsedRealtime()
+            esperarResposta()
+        }
+    }
+
+    /** A vez da pessoa (ou ela acabou de falar): a contagem sem resposta recomeça do zero. */
+    private fun esperarResposta() {
+        _ultimaResposta.value = SystemClock.elapsedRealtime()
+        apitos = 0
+        handler.removeCallbacks(silencio)
+        handler.postDelayed(silencio, SILENCIO_APITO_MS)
+    }
+
+    /** Sem resposta na verificação: um apito alto a cada [SILENCIO_APITO_MS] e, em [SILENCIO_ZERA_MS], zera como a vigia. */
+    private val silencio = object : Runnable {
+        override fun run() {
+            if (apitos < (SILENCIO_ZERA_MS / SILENCIO_APITO_MS).toInt() - 1) {
+                apitos++
+                Log.i(TAG, "Missão: ${apitos * SILENCIO_APITO_MS / 1000} s sem responder na verificação, apito $apitos")
+                sirene.apito(apitos)
+                handler.postDelayed(this, SILENCIO_APITO_MS)
+                return
+            }
+            Log.i(TAG, "Missão: ${SILENCIO_ZERA_MS / 1000} s sem responder na verificação, anel zera e a música volta")
+            zerarAnel()
+            religarMusica()
+            _tocando.value?.let { mostrarNotificacao(it) }
+        }
+    }
+
+    /** A pessoa repetiu a frase da vez: o "plim" e a próxima frase, ou o agradecimento depois da última. */
+    private fun repetiuFrase() {
+        val v = _verificacao.value?.takeIf { it.suaVez } ?: return
+        Log.i(TAG, "Missão: frase ${v.numero} de ${frasesDeHoje.size} repetida")
+        handler.removeCallbacks(silencio)
+        _verificacao.value = v.copy(suaVez = false)
+        val rodada = rodadaVerificacao
+        sirene.acerto {
+            if (rodada != rodadaVerificacao) return@acerto
+            if (v.numero < frasesDeHoje.size) falarFrase(v.numero) else agradecer()
+        }
+    }
+
+    /** Fim da verificação: a voz agradece ([FALA_METADE]) e a câmera volta, agora mais exigente. */
+    private fun agradecer() {
+        val rodada = rodadaVerificacao
+        _verificacao.value = Verificacao(frase = "", numero = frasesDeHoje.size, suaVez = false)
+        sirene.falar(voz?.fixa(FALA_DA_METADE)) {
+            if (rodada != rodadaVerificacao) return@falar
+            Log.i(TAG, "Missão: verificação feita, a segunda metade é mais exigente com os olhos")
+            _verificacao.value = null
+            // A meta pode ter subido no meio (alarme de verdade tomou o lugar do teste): aí a metade ainda não chegou
+            _metadeVerificada.value = _olhado.value >= (_tocando.value?.let(::metaOlhar) ?: 0L) / 2
+            adiarVigia()
+        }
     }
 
     /** Sinal de "olhando" (ou o "stop"): a contagem sem olhar recomeça do zero, sem bipes. */
@@ -425,6 +574,10 @@ class AlarmeService : Service() {
         handler.removeCallbacks(anunciarInicio)
         _saudando.value = false
         voz?.cancelar()
+        // No meio da verificação: ela para; volta do começo na próxima vez que o anel chegar na metade
+        rodadaVerificacao++
+        handler.removeCallbacks(silencio)
+        _verificacao.value = null
         if (_silenciado.value) {
             _silenciado.value = false
             sirene.tocar()

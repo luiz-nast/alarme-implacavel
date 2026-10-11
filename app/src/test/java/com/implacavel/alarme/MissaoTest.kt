@@ -5,6 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.LocalDate
 import java.time.LocalTime
 
 /** Regras da missão pra desligar (RegrasMissao.kt). */
@@ -29,7 +30,11 @@ class MissaoTest {
         assertEquals(Leitura.OLHANDO, classificarRosto(0.9f, 0.8f))
         assertEquals(Leitura.OLHANDO, classificarRosto(0.5f, 0.45f)) // sonolento, sem arregalar
         assertEquals(Leitura.OLHANDO, classificarRosto(null, 0.5f)) // um olho só visível
+        assertEquals(Leitura.OLHANDO, classificarRosto(0.45f, 0.4f)) // ainda acordando, na primeira metade passa
         assertEquals(Leitura.OLHOS_FECHADOS, classificarRosto(0.4f, 0.35f)) // quase dormindo: não conta
+        // Na segunda metade, um pouco mais exigente (sem chegar a 60% em cada olho)
+        assertEquals(Leitura.OLHOS_FECHADOS, classificarRosto(0.5f, 0.5f, exigente = true))
+        assertEquals(Leitura.OLHANDO, classificarRosto(0.6f, 0.55f, exigente = true))
     }
 
     @Test
@@ -37,6 +42,15 @@ class MissaoTest {
         assertEquals(Leitura.OLHOS_FECHADOS, classificarRosto(0.05f, 0.1f))
         assertEquals(Leitura.OLHOS_FECHADOS, classificarRosto(0.3f, 0.2f))
         assertEquals(Leitura.OLHOS_FECHADOS, classificarRosto(null, null))
+    }
+
+    @Test
+    fun certezaDeOlhoAbertoEAMediaDosOlhosVistos() {
+        assertEquals(0.7f, olhoAberto(0.9f, 0.5f)!!, 0.001f)
+        assertEquals(0.6f, olhoAberto(null, 0.6f)!!, 0.001f)
+        assertNull(olhoAberto(null, null))
+        assertEquals(0.40f, minimoOlhoAberto(exigente = false), 0.001f)
+        assertEquals(0.55f, minimoOlhoAberto(exigente = true), 0.001f)
     }
 
     @Test
@@ -110,8 +124,41 @@ class MissaoTest {
         assertEquals(10, marcoCompletado(9 * 60_000L + 59_500, 10 * 60_000L + 300, meta))
         assertNull(marcoCompletado(10 * 60_000L + 300, 10 * 60_000L + 1_300, meta)) // já avisou
         assertEquals(30, marcoCompletado(29 * 60_000L + 59_000, 30 * 60_000L, meta))
+        assertNull(marcoCompletado(19 * 60_000L + 59_000, 20 * 60_000L, meta)) // na metade vem a verificação
         assertNull(marcoCompletado(39 * 60_000L + 59_000, 40 * 60_000L, meta)) // nos 40 o alarme já desliga
         assertNull(marcoCompletado(29_000, 30_000, 30_000)) // teste: nenhum aviso
         assertEquals("20 minutes passed.", falaDosMinutos(20))
+    }
+
+    @Test
+    fun repetirAFraseAceitaSotaqueEContracao() {
+        val frase = "I am fully awake and ready to make money"
+        assertTrue(repetiu(frase, "I'm fully awake and ready to make money"))
+        assertTrue(repetiu(frase, "fully awake and ready to make monney")) // uma letra a mais: 6 iguais + 1 parecida = 7 de 9
+        assertFalse(repetiu(frase, "fully awake and ready to make many")) // duas letras trocadas não valem: 6 de 9
+        assertFalse(repetiu("I rise early and I rise strong", "I rise early")) // cada palavra ouvida vale uma vez
+        assertTrue(repetiu(frase, "fully awake and ready to make money")) // faltou o começo
+        assertFalse(repetiu(frase, "good morning"))
+        assertFalse(repetiu(frase, ""))
+    }
+
+    @Test
+    fun palavrasJaDitasFicamVerdes() {
+        fun verdes(frase: String, ouviu: String) = palavrasDitas(frase, ouviu).filter { it.second }.map { it.first }
+        assertEquals(listOf("I", "am", "fully"), verdes("I am fully awake.", "I'm fuly"))
+        assertEquals(listOf("awake."), verdes("I am fully awake.", "awake")) // a pontuação fica na tela
+        assertEquals(listOf("I", "rise"), verdes("I rise early and I rise strong", "I rise")) // cada palavra ouvida pinta uma só
+        assertEquals(4, palavrasDitas("I am fully awake.", "").size)
+        assertTrue(palavrasDitas("I am fully awake.", "").none { it.second })
+    }
+
+    @Test
+    fun cincoFrasesDiferentesPorDia() {
+        val hoje = frasesDoDia(LocalDate.of(2026, 10, 11))
+        assertEquals(FRASES_POR_VERIFICACAO, hoje.toSet().size)
+        assertEquals(hoje, frasesDoDia(LocalDate.of(2026, 10, 11))) // as mesmas no mesmo dia
+        assertTrue(hoje != frasesDoDia(LocalDate.of(2026, 10, 12)))
+        // Curtas, mas não tanto quanto "I want to be rich"
+        assertTrue(FRASES_MOTIVACIONAIS.all { it.split(" ").size in 6..12 })
     }
 }

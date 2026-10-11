@@ -125,6 +125,7 @@ private fun TelaAlarme(alarme: Alarme) {
     // tela ser fechada ou recriada, e a vigia do serviço, ao religar a música, volta pra etapa de falar.
     val silenciado by AlarmeService.silenciado.collectAsStateWithLifecycle()
     val saudando by AlarmeService.saudando.collectAsStateWithLifecycle()
+    val verificacao by AlarmeService.verificacao.collectAsStateWithLifecycle()
     val comemorando by AlarmeService.comemorando.collectAsStateWithLifecycle()
     val desbloqueado = celularDesbloqueado()
     val agora = agoraACada(1_000)
@@ -153,7 +154,7 @@ private fun TelaAlarme(alarme: Alarme) {
 
     // O YouTube da etapa da câmera vive enquanto esta tela estiver aberta; fora da etapa, pausado
     val youtube = rememberYoutubeDaMissao()
-    val etapaOlhar = alarme.missao && desbloqueado && silenciado && !saudando && !comemorando
+    val etapaOlhar = alarme.missao && desbloqueado && silenciado && !saudando && !comemorando && verificacao == null
     LaunchedEffect(etapaOlhar) { if (etapaOlhar) youtube.retomar() else youtube.pausar() }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(Brush.verticalGradient(fundo))) {
@@ -170,6 +171,7 @@ private fun TelaAlarme(alarme: Alarme) {
             !desbloqueado -> pagina { EtapaDesbloquear() }
             !silenciado -> pagina { EtapaFalar(meta, onStop = { AlarmeService.silenciar(ctx) }) }
             saudando -> pagina { EtapaSaudacao(agora.hour) }
+            verificacao != null -> verificacao?.let { passo -> pagina { EtapaVerificacao(passo) } }
             else -> EtapaOlhar(
                 metaMs = meta,
                 onDefeito = { AlarmeService.missaoCumprida(ctx, comemorar = false) },

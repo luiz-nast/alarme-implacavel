@@ -42,17 +42,31 @@ fun disseStop(texto: String): Boolean {
 /**
  * Olho aberto pro ML Kit: a média dos dois olhos (probabilidade de aberto) acima disto. Olho fechado
  * dá perto de 0. Cada olho acima de 60% obrigava a arregalar; a média acima de 30% deixava passar
- * quem ainda estava dormindo (o dono voltou a dormir depois da missão). 45% fica no meio.
+ * quem ainda estava dormindo (o dono voltou a dormir depois da missão); 45% ficou rude demais na
+ * primeira metade, ainda acordando. 40% fica no meio.
  */
-private const val OLHO_ABERTO = 0.45f
+private const val OLHO_ABERTO = 0.40f
+
+/** Na segunda metade da atividade, depois da verificação, um pouco mais: ainda sem arregalar (60% em cada olho). */
+private const val OLHO_ABERTO_EXIGENTE = 0.55f
+
+/** O mínimo de [olhoAberto] pra contar como olhando: [OLHO_ABERTO], ou [OLHO_ABERTO_EXIGENTE] se [exigente]. */
+fun minimoOlhoAberto(exigente: Boolean): Float = if (exigente) OLHO_ABERTO_EXIGENTE else OLHO_ABERTO
 
 /**
- * Olhando = os olhos abertos ([OLHO_ABERTO]), com o rosto em qualquer ângulo (não precisa estar de
- * frente: quem está acordando não fica reto). Sem informação de nenhum olho, conta como fechado.
+ * A certeza do ML Kit de que os olhos estão abertos, de 0 (fechados) a 1 (abertos): a média dos olhos
+ * que ele vê. Null sem nenhum olho.
  */
-fun classificarRosto(olhoEsquerdo: Float?, olhoDireito: Float?): Leitura {
-    val olhos = listOfNotNull(olhoEsquerdo, olhoDireito)
-    return if (olhos.isNotEmpty() && olhos.average() > OLHO_ABERTO) Leitura.OLHANDO else Leitura.OLHOS_FECHADOS
+fun olhoAberto(olhoEsquerdo: Float?, olhoDireito: Float?): Float? =
+    listOfNotNull(olhoEsquerdo, olhoDireito).takeIf { it.isNotEmpty() }?.average()?.toFloat()
+
+/**
+ * Olhando = os olhos abertos acima do [minimoOlhoAberto], com o rosto em qualquer ângulo (não precisa
+ * estar de frente: quem está acordando não fica reto). Sem informação de nenhum olho, conta como fechado.
+ */
+fun classificarRosto(olhoEsquerdo: Float?, olhoDireito: Float?, exigente: Boolean = false): Leitura {
+    val aberto = olhoAberto(olhoEsquerdo, olhoDireito)
+    return if (aberto != null && aberto > minimoOlhoAberto(exigente)) Leitura.OLHANDO else Leitura.OLHOS_FECHADOS
 }
 
 /**
@@ -65,12 +79,77 @@ fun avancarOlhar(olhadoMs: Long, olhando: Boolean, passoMs: Long): Long = if (ol
 const val MARCO_MS = 10 * 60_000L
 
 /**
- * Marco de [MARCO_MS] completado quando o anel passou de [antesMs] pra [depoisMs], em minutos (10, 20,
- * 30), ou null. O fim da [metaMs] não conta: aí o alarme já desliga.
+ * Marco de [MARCO_MS] completado quando o anel passou de [antesMs] pra [depoisMs], em minutos (10, 30),
+ * ou null. A metade da [metaMs] não conta (aí vem a verificação), nem o fim (o alarme já desliga).
  */
 fun marcoCompletado(antesMs: Long, depoisMs: Long, metaMs: Long): Int? {
     val marco = depoisMs / MARCO_MS * MARCO_MS
-    return if (marco > antesMs && marco in 1 until metaMs) (marco / 60_000).toInt() else null
+    return if (marco > antesMs && marco in 1 until metaMs && marco != metaMs / 2) (marco / 60_000).toInt() else null
+}
+
+/** Na verificação do meio, sem responder nada por esse tempo, um apito alto; a cada mais esse tempo, outro. */
+const val SILENCIO_APITO_MS = 5_000L
+
+/** Sem responder nada na verificação por esse tempo, a missão zera (como os 20 s sem olhar). */
+const val SILENCIO_ZERA_MS = 20_000L
+
+/**
+ * Prazo de cada frase da verificação: depois dele, falar sem acertar a frase não segura mais a contagem
+ * do silêncio (senão uma TV ligada, ou resmungar da cama, prenderia a verificação pra sempre).
+ */
+const val PRAZO_FRASE_MS = 30_000L
+
+/**
+ * A pessoa repetiu a [frase] no que o reconhecedor [ouviu]: pelo menos 70% das palavras dela, aceitando
+ * uma letra trocada nas palavras grandes (o reconhecedor erra sotaque) e as contrações ("I'm" = "I am").
+ */
+fun repetiu(frase: String, ouviu: String): Boolean {
+    val acertos = acertos(palavras(frase), ouviu)
+    return acertos.isNotEmpty() && acertos.count { it } >= ceil(acertos.size * 0.7)
+}
+
+/**
+ * Cada palavra da [frase], como aparece na tela, e se ela já está no que o reconhecedor [ouviu] (a tela
+ * pinta de verde enquanto a pessoa fala), pela mesma conta de [repetiu].
+ */
+fun palavrasDitas(frase: String, ouviu: String): List<Pair<String, Boolean>> {
+    val pedacos = frase.split(" ").filter { it.isNotBlank() }
+    val porPedaco = pedacos.map(::palavras) // "I'm" são duas: "i" e "am"
+    val acertos = acertos(porPedaco.flatten(), ouviu).iterator()
+    return pedacos.zip(porPedaco) { pedaco, ps -> pedaco to ps.map { acertos.next() }.all { it } }
+}
+
+/**
+ * Pra cada palavra do [alvo], se ela está no que foi [ouviu]. Cada palavra ouvida vale pra uma só do
+ * alvo ("I rise early" não conta o "I" e o "rise" duas vezes); primeiro as iguais, depois as parecidas.
+ */
+private fun acertos(alvo: List<String>, ouviu: String): List<Boolean> {
+    val sobra = palavras(ouviu).toMutableList()
+    val iguais = alvo.map { sobra.remove(it) }
+    return alvo.zip(iguais) { p, igual ->
+        if (igual) return@zip true
+        val i = if (p.length >= 4) sobra.indexOfFirst { distancia(it, p) <= 1 } else -1
+        if (i >= 0) sobra.removeAt(i)
+        i >= 0
+    }
+}
+
+private fun palavras(texto: String): List<String> =
+    Normalizer.normalize(texto.lowercase(), Normalizer.Form.NFD).replace(Regex("\\p{M}"), "")
+        .replace("’", "'").replace("i'm", "i am").replace("n't", " not").replace("'re", " are").replace("'ll", " will")
+        .replace("'ve", " have").replace("it's", "it is").replace("'", "")
+        .split(Regex("[^a-z0-9]+")).filter { it.isNotBlank() }
+
+/** Quantas letras trocar, pôr ou tirar pra uma palavra virar a outra. */
+private fun distancia(a: String, b: String): Int {
+    var anterior = IntArray(b.length + 1) { it }
+    for (i in a.indices) {
+        val atual = IntArray(b.length + 1)
+        atual[0] = i + 1
+        for (j in b.indices) atual[j + 1] = minOf(anterior[j + 1] + 1, atual[j] + 1, anterior[j] + if (a[i] == b[j]) 0 else 1)
+        anterior = atual
+    }
+    return anterior[b.length]
 }
 
 /** Contagem na tela: depois de [AVISO_SEM_OLHAR_MS] sem olhar, os segundos que faltam pro anel zerar; antes, null. */

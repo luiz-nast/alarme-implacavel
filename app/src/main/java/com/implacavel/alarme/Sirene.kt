@@ -142,14 +142,14 @@ class Sirene(private val ctx: Context) {
      * [FOLGA_BIPE_MS]), o volume de alarme fica no degrau dele ([volumeDoBipe]), por cima da trava;
      * depois, volta ao de antes. O último, já no volume máximo, só fica mais alto com um som mais forte.
      */
-    fun bipe(n: Int) {
+    fun bipe(n: Int, som: Int = if (n >= BIPES_ATE_ZERAR) R.raw.bipe_final else R.raw.bipe) {
         val maximo = audio.getStreamMaxVolume(AudioManager.STREAM_ALARM)
         val degrau = volumeDoBipe(n, maximo)
         if (volumeAntesDoBipe == null) volumeAntesDoBipe = audio.getStreamVolume(AudioManager.STREAM_ALARM)
         runCatching { audio.setStreamVolume(AudioManager.STREAM_ALARM, degrau, 0) }
         Log.i(TAG, "Sirene: bipe $n no volume $degrau de $maximo")
         bipador?.release()
-        bipador = tocarArquivo(somDoApp(if (n >= BIPES_ATE_ZERAR) R.raw.bipe_final else R.raw.bipe), emLoop = false)
+        bipador = tocarArquivo(somDoApp(som), emLoop = false)
         handler.removeCallbacks(voltarDoBipe)
         handler.postDelayed(voltarDoBipe, (bipador?.duration?.coerceAtLeast(0) ?: 0) + FOLGA_BIPE_MS)
     }
@@ -161,7 +161,16 @@ class Sirene(private val ctx: Context) {
     /** O bipe positivo de "pode começar", antes da câmera. */
     fun positivo(aoTerminar: () -> Unit) = tocarUmaVez(somDoApp(R.raw.positivo), aoTerminar)
 
-    /** O bipe leve antes da fala de parabéns, no fim da atividade. */
+    /**
+     * Apito alto [n] (1 a 3) da verificação do meio, sem resposta: o som do último bipe da vigia, nos três
+     * degraus de cima do [volumeDoBipe], cada vez mais alto.
+     */
+    fun apito(n: Int) = bipe(BIPES_ATE_ZERAR - 3 + n, R.raw.bipe_final)
+
+    /** O "plim" de uma frase repetida certa, na verificação do meio. */
+    fun acerto(aoTerminar: () -> Unit) = tocarUmaVez(somDoApp(R.raw.acerto), aoTerminar)
+
+    /** O bipe leve antes da fala de parabéns, no fim da atividade (e antes da verificação do meio). */
     fun leve(aoTerminar: () -> Unit) = tocarUmaVez(somDoApp(R.raw.leve), aoTerminar)
 
     /** O estouro de comemoração, depois da fala de parabéns. */
