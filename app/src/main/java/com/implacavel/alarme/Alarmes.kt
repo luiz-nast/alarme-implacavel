@@ -22,7 +22,8 @@ object Alarmes {
     fun carregar(ctx: Context) {
         prefs = ctx.prefsProtegidas("alarmes")
         val json = JSONArray(prefs.getString("lista", null) ?: "[]")
-        _lista.value = (0 until json.length()).map { Alarme.deJson(json.getJSONObject(it)) }
+        // Um tipo só por alarme: com missão é despertador com atividade, sem missão é lembrete (versões antigas deixavam os dois ou nenhum)
+        _lista.value = (0 until json.length()).map { Alarme.deJson(json.getJSONObject(it)) }.map { it.copy(remedio = !it.missao) }
     }
 
     fun buscar(id: Int): Alarme? = _lista.value.firstOrNull { it.id == id }

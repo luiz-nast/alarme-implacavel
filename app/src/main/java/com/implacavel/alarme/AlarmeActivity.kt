@@ -6,6 +6,7 @@ import android.os.UserManager
 import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.setContent
@@ -15,11 +16,15 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -37,21 +42,28 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 
@@ -60,13 +72,16 @@ import kotlinx.coroutines.delay
  * cima da tela de bloqueio, acende a tela e fecha sozinha quando o alarme para.
  * Com a missão ligada, mostra as etapas de Missao.kt; sem ela, só o botão DESLIGAR.
  */
+private const val TRANSPARENTE = android.graphics.Color.TRANSPARENT
+
 class AlarmeActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         acordarTela()
-        enableEdgeToEdge()
+        // Ícones claros na barra de cima, pro fundo vermelho; a TelaAlarme troca pra escuros na etapa da câmera
+        enableEdgeToEdge(SystemBarStyle.dark(TRANSPARENTE), SystemBarStyle.dark(TRANSPARENTE))
         setContent {
-            TemaImplacavel(escuro = true) {
+            TemaImplacavel {
                 val alarme by AlarmeService.tocando.collectAsStateWithLifecycle()
                 BackHandler { /* o botão voltar não desliga o alarme */ }
                 LaunchedEffect(alarme) { if (alarme == null) finish() }
@@ -75,9 +90,11 @@ class AlarmeActivity : ComponentActivity() {
         }
     }
 
-    // Abaixar ou silenciar pelos botões laterais não cala o alarme
+    // Abaixar ou silenciar pelos botões laterais não cala a música. Depois do STOP (câmera, YouTube) os
+    // botões voltam a valer: o volume do vídeo é da pessoa, e as falas e bipes do alarme sobem o próprio volume
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean =
-        keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_MUTE || super.onKeyDown(keyCode, event)
+        !AlarmeService.silenciado.value && (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_MUTE) ||
+            super.onKeyDown(keyCode, event)
 
     // Fechar esta tela no meio (Home, arrastar o app, apagar a tela) faz o serviço reabri-la em segundos
     override fun onStart() {
@@ -107,61 +124,125 @@ private fun TelaAlarme(alarme: Alarme) {
     // A etapa vem do serviço (música calada = já disse STOP, falta a câmera). Assim ela sobrevive à
     // tela ser fechada ou recriada, e a vigia do serviço, ao religar a música, volta pra etapa de falar.
     val silenciado by AlarmeService.silenciado.collectAsStateWithLifecycle()
+    val saudando by AlarmeService.saudando.collectAsStateWithLifecycle()
+    val comemorando by AlarmeService.comemorando.collectAsStateWithLifecycle()
     val desbloqueado = celularDesbloqueado()
     val agora = agoraACada(1_000)
 
-    // Na etapa da câmera a tela fica clara e no brilho máximo, pra iluminar o rosto no escuro
+    // A tela do alarme fica no brilho máximo do começo ao fim; na etapa da câmera, também clara, pra iluminar o rosto no escuro
+    BrilhoMaximo()
     val claro = alarme.missao && silenciado
-    BrilhoMaximo(claro)
+    BarrasDoSistema(iconesEscuros = claro)
     val corTexto = if (claro) VinhoAlarme else Color.White
     val fundo = if (claro) listOf(Color(0xFFFFFBF2), Color(0xFFFFE0B2)) else listOf(VermelhoAlarme, VinhoAlarme, Color.Black)
 
-    val escala by rememberInfiniteTransition(label = "pulso").animateFloat(
-        initialValue = 1f,
-        targetValue = 1.18f,
-        animationSpec = infiniteRepeatable(tween(550), RepeatMode.Reverse),
-        label = "escala",
-    )
+    // Lido só ao desenhar o ícone: o pulso não recompõe a tela inteira a cada quadro. Na etapa da
+    // câmera (até 40 min) o ícone fica parado: animação sem fim redesenha a tela a cada quadro e esquenta
+    val pulso: State<Float> = if (claro) {
+        remember { mutableFloatStateOf(1f) }
+    } else {
+        rememberInfiniteTransition(label = "pulso").animateFloat(
+            initialValue = 1f,
+            targetValue = 1.18f,
+            animationSpec = infiniteRepeatable(tween(550), RepeatMode.Reverse),
+            label = "escala",
+        )
+    }
+    // Uma rolagem só pras páginas do alarme: o círculo da câmera, por cima da página, também rola ela
+    val rolagem = rememberScrollState()
 
-    // Coluna rolável com altura mínima da tela: centraliza quando cabe e rola em celulares pequenos
+    // O YouTube da etapa da câmera vive enquanto esta tela estiver aberta; fora da etapa, pausado
+    val youtube = rememberYoutubeDaMissao()
+    val etapaOlhar = alarme.missao && desbloqueado && silenciado && !saudando && !comemorando
+    LaunchedEffect(etapaOlhar) { if (etapaOlhar) youtube.retomar() else youtube.pausar() }
+
     BoxWithConstraints(Modifier.fillMaxSize().background(Brush.verticalGradient(fundo))) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .heightIn(min = maxHeight)
-                .safeDrawingPadding()
-                .padding(horizontal = 24.dp, vertical = 16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Spacer(Modifier.height(16.dp))
-                Icon(
-                    painterResource(R.drawable.ic_alarme),
-                    contentDescription = null,
-                    tint = corTexto,
-                    modifier = Modifier.size(56.dp).scale(escala),
-                )
-                Text(hhmm(agora.toLocalTime()), color = corTexto, fontSize = 72.sp, fontWeight = FontWeight.Bold)
-                Text(alarme.nome, color = corTexto, fontSize = 22.sp, textAlign = TextAlign.Center)
+        val alturaMinima = maxHeight
+        val deitado = maxWidth > maxHeight
+        val pagina: @Composable (@Composable () -> Unit) -> Unit = { conteudo ->
+            PaginaAlarme(alturaMinima, deitado, rolagem, corTexto, pulso, hhmm(agora.toLocalTime()), alarme.nome, conteudo)
+        }
+        val meta = metaOlhar(alarme)
+        when {
+            comemorando -> pagina { EtapaFim() }
+            !alarme.missao -> pagina { BotaoGrande("DESLIGAR", { AlarmeService.desligar(ctx) }) }
+            // Logo depois de o celular reiniciar, a voz do Google só roda depois do primeiro desbloqueio
+            !desbloqueado -> pagina { EtapaDesbloquear() }
+            !silenciado -> pagina { EtapaFalar(meta, onStop = { AlarmeService.silenciar(ctx) }) }
+            saudando -> pagina { EtapaSaudacao(agora.hour) }
+            else -> EtapaOlhar(
+                metaMs = meta,
+                onDefeito = { AlarmeService.missaoCumprida(ctx, comemorar = false) },
+                youtube = youtube,
+                pagina = pagina,
+                rolagem = rolagem,
+                onOlhando = { AlarmeService.olhando(ctx, it) },
+                onConcluiu = { AlarmeService.missaoCumprida(ctx) },
+            )
+        }
+    }
+}
+
+/**
+ * Moldura das telas do alarme: ícone pulsando, hora e nome, e [conteudo] (a etapa). Em pé, um embaixo do
+ * outro, numa coluna rolável com altura mínima da tela (centraliza quando cabe e rola em celulares
+ * pequenos); [deitado], lado a lado, com a etapa rolando sozinha na metade dela.
+ */
+@Composable
+private fun PaginaAlarme(
+    alturaMinima: Dp,
+    deitado: Boolean,
+    rolagem: ScrollState,
+    corTexto: Color,
+    pulso: State<Float>,
+    hora: String,
+    nome: String,
+    conteudo: @Composable () -> Unit,
+) {
+    val cabecalho = @Composable {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(
+                painterResource(R.drawable.ic_alarme),
+                contentDescription = null,
+                tint = corTexto,
+                modifier = Modifier.size(56.dp).graphicsLayer {
+                    scaleX = pulso.value
+                    scaleY = pulso.value
+                },
+            )
+            Text(hora, color = corTexto, fontSize = 72.sp, fontWeight = FontWeight.Bold)
+            Text(nome, color = corTexto, fontSize = 22.sp, textAlign = TextAlign.Center)
+        }
+    }
+    // A etapa muda de lugar ao girar sem recomeçar (o microfone e a câmera seguem ligados)
+    val etapa = remember { movableContentOf { corpo: @Composable () -> Unit -> corpo() } }
+    if (deitado) {
+        Row(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 24.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { cabecalho() }
+            Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                Column(Modifier.verticalScroll(rolagem), horizontalAlignment = Alignment.CenterHorizontally) { etapa(conteudo) }
             }
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Spacer(Modifier.height(16.dp))
-                val meta = metaOlhar(alarme)
-                when {
-                    !alarme.missao -> BotaoGrande("DESLIGAR", { AlarmeService.desligar(ctx) })
-                    // Logo depois de o celular reiniciar, a voz do Google só roda depois do primeiro desbloqueio
-                    !desbloqueado -> EtapaDesbloquear()
-                    !silenciado -> EtapaFalar(meta, onStop = { AlarmeService.silenciar(ctx) })
-                    else -> EtapaOlhar(
-                        metaMs = meta,
-                        onOlhando = { AlarmeService.olhando(ctx, it) },
-                        onConcluiu = { AlarmeService.missaoCumprida(ctx) },
-                    )
-                }
-                Spacer(Modifier.height(24.dp))
-            }
+        }
+        return
+    }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .verticalScroll(rolagem)
+            .heightIn(min = alturaMinima)
+            .safeDrawingPadding()
+            .padding(horizontal = 24.dp, vertical = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Spacer(Modifier.height(16.dp))
+            cabecalho()
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Spacer(Modifier.height(16.dp))
+            etapa(conteudo)
+            Spacer(Modifier.height(24.dp))
         }
     }
 }
@@ -192,13 +273,26 @@ private fun celularDesbloqueado(): Boolean {
     return desbloqueado
 }
 
-/** Força o brilho máximo da tela enquanto [ligado]; ao sair, devolve o brilho do sistema. */
+/** Ícones das barras do sistema (hora, bateria, navegação) escuros no fundo claro, claros no vermelho. */
 @Composable
-private fun BrilhoMaximo(ligado: Boolean) {
+private fun BarrasDoSistema(iconesEscuros: Boolean) {
     val janela = LocalActivity.current?.window ?: return
-    DisposableEffect(ligado) {
+    val vista = LocalView.current
+    SideEffect {
+        WindowCompat.getInsetsController(janela, vista).run {
+            isAppearanceLightStatusBars = iconesEscuros
+            isAppearanceLightNavigationBars = iconesEscuros
+        }
+    }
+}
+
+/** Força o brilho máximo da tela; ao sair, devolve o brilho do sistema. */
+@Composable
+private fun BrilhoMaximo() {
+    val janela = LocalActivity.current?.window ?: return
+    DisposableEffect(janela) {
         val original = janela.attributes.screenBrightness
-        if (ligado) janela.attributes = janela.attributes.apply { screenBrightness = 1f }
+        janela.attributes = janela.attributes.apply { screenBrightness = 1f }
         onDispose { janela.attributes = janela.attributes.apply { screenBrightness = original } }
     }
 }

@@ -29,7 +29,8 @@ class AlarmeReceiver : BroadcastReceiver() {
         val alarme = if (id == Alarme.ID_TESTE) Alarme.teste() else atualizarSalvo(ctx, id) ?: return
         // Foto e rede de segurança antes do serviço: se o app cair daqui pra frente, o alarme volta.
         // Se outro alarme já está em andamento, os dois viram um (EmAndamento.juntar).
-        val volume = ctx.getSystemService(AudioManager::class.java).getStreamVolume(AudioManager.STREAM_ALARM)
+        // No meio da comemoração de outro alarme o volume está nos 40% dela: o de antes é o guardado
+        val volume = Ajustes.volumeParaDevolver ?: ctx.getSystemService(AudioManager::class.java).getStreamVolume(AudioManager.STREAM_ALARM)
         val agora = System.currentTimeMillis()
         Ajustes.emAndamento = Ajustes.emAndamento?.juntar(alarme, agora)
             ?: EmAndamento(alarme, agora, Ajustes.musica.value?.uri, volume)

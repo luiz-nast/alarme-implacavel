@@ -1,0 +1,116 @@
+// Falas do alarme: a saudação depois do STOP ("Good morning! It's 5:05 AM. It's time for the activity
+// check."), o "Activity starting now." e os avisos de 10 em 10 min de câmera. Os textos são funções puras
+// (testadas em MissaoTest); a Voz grava a fala do sintetizador do celular num arquivo pra Sirene tocar no
+// alto-falante, como o resto do alarme. Quem decide a hora de cada fala é o AlarmeService.
+package com.implacavel.alarme
+
+import android.content.Context
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
+import android.util.Log
+import java.io.File
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+
+/** "Good morning" das 4h ao meio-dia, "Good afternoon" até as 18h, "Good evening" no resto. */
+fun saudacao(hora: Int): String = when (hora) {
+    in 4..11 -> "Good morning"
+    in 12..17 -> "Good afternoon"
+    else -> "Good evening"
+}
+
+fun textoDaSaudacao(agora: LocalTime): String =
+    "${saudacao(agora.hour)}! It's ${agora.format(DateTimeFormatter.ofPattern("h:mm a", Locale.US))}. It's time for the activity check."
+
+const val FALA_INICIO = "Activity starting now."
+
+const val FALA_FIM = "Congratulations, sir! The activity is done. Have a good time getting back to your activities."
+
+fun falaDosMinutos(minutos: Int) = "$minutos minutes passed."
+
+/**
+ * O sintetizador de voz do celular, em inglês (roda sem internet com a voz instalada). Criado quando o
+ * alarme começa (com o celular já desbloqueado desde que ligou: antes, o sintetizador nem abre): assim
+ * que fica pronto, já grava as falas fixas ([FALA_INICIO] e os avisos de minutos), que depois saem na
+ * hora. [gravar] grava uma fala nova (a saudação, que tem a hora); pedida antes de ele ficar pronto,
+ * espera. Sem voz em inglês ou sem sintetizador, as falas não existem (null) e o alarme segue sem elas.
+ */
+class Voz(ctx: Context, fixas: Map<String, String>) {
+    private val pasta = ctx.cacheDir
+    private val handler = Handler(Looper.getMainLooper())
+    private var pronta: Boolean? = null // null = ainda abrindo o sintetizador
+    private val gravadas = mutableSetOf<String>()
+    private val esperando = mutableMapOf<String, (File?) -> Unit>()
+    private val naFila = mutableMapOf<String, String>() // pedidas antes de ficar pronta: id → texto
+    private lateinit var tts: TextToSpeech
+
+    init {
+        tts = TextToSpeech(ctx) { status ->
+            pronta = status == TextToSpeech.SUCCESS && tts.setLanguage(Locale.US) >= TextToSpeech.LANG_AVAILABLE
+            if (pronta != true) {
+                Log.w(TAG, "Voz: sem sintetizador ou sem voz em inglês, o alarme segue sem as falas")
+                naFila.clear()
+                esperando.values.toList().also { esperando.clear() }.forEach { it(null) }
+                return@TextToSpeech
+            }
+            tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(id: String) {}
+                override fun onDone(id: String) = entregar(id, ok = true)
+                override fun onError(id: String, codigo: Int) = entregar(id, ok = false)
+
+                @Deprecated("Exigido pela classe; o Android novo chama o onError com código")
+                override fun onError(id: String) = entregar(id, ok = false)
+            })
+            fixas.forEach { (id, texto) -> sintetizar(id, texto) }
+            naFila.forEach { (id, texto) -> sintetizar(id, texto) }
+            naFila.clear()
+        }
+    }
+
+    /** Uma fala fixa já gravada, ou null (ainda não, ou sem voz). */
+    fun fixa(id: String): File? = arquivo(id).takeIf { id in gravadas }
+
+    /**
+     * Grava [texto] e chama [aoGravar] na thread principal com o arquivo (ou null, se não deu). Cada
+     * pedido precisa de um [id] novo: uma gravação velha, que terminou depois, não chega no pedido seguinte.
+     */
+    fun gravar(id: String, texto: String, aoGravar: (File?) -> Unit) {
+        when (pronta) {
+            false -> return aoGravar(null)
+            null -> naFila[id] = texto
+            true -> sintetizar(id, texto)
+        }
+        esperando[id] = aoGravar
+    }
+
+    /** A música voltou: ninguém mais espera pelas falas em gravação. */
+    fun cancelar() {
+        esperando.clear()
+        naFila.clear()
+    }
+
+    fun desligar() {
+        cancelar()
+        runCatching { tts.shutdown() }
+        pasta.listFiles { f -> f.name.startsWith("fala_") }?.forEach { it.delete() }
+    }
+
+    private fun arquivo(id: String) = File(pasta, "fala_$id.wav")
+
+    private fun sintetizar(id: String, texto: String) {
+        gravadas.remove(id)
+        val ok = runCatching { tts.synthesizeToFile(texto, Bundle(), arquivo(id), id) == TextToSpeech.SUCCESS }.getOrDefault(false)
+        if (!ok) entregar(id, ok = false)
+    }
+
+    private fun entregar(id: String, ok: Boolean) {
+        handler.post {
+            if (ok) gravadas += id
+            esperando.remove(id)?.invoke(if (ok) arquivo(id) else null)
+        }
+    }
+}

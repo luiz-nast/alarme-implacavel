@@ -51,7 +51,7 @@ class AlarmeTest {
     @Test
     fun jsonIdaEVolta() {
         // A foto do alarme em andamento (Ajustes.emAndamento) depende disto
-        val alarme = Alarme(3, 6, 45, rotulo = "Academia", dias = setOf(1, 3, 5), ativo = false, missao = false, volumeForte = false)
+        val alarme = Alarme(3, 6, 45, rotulo = "Academia", dias = setOf(1, 3, 5), ativo = false, missao = false, remedio = true)
         assertEquals(alarme, Alarme.deJson(alarme.paraJson()))
         assertEquals(Alarme.teste(), Alarme.deJson(Alarme.teste().paraJson()))
     }
@@ -67,15 +67,14 @@ class AlarmeTest {
     @Test
     fun doisAlarmesJuntosFicamComAExigenciaMaior() {
         // Pré-alarme sem missão ainda tocando quando o alarme de verdade dispara
-        val preAlarme = EmAndamento(Alarme(1, 6, 55, missao = false, volumeForte = false), desde = 0, musica = null, volume = 5)
-        val junto = preAlarme.juntar(Alarme(2, 7, 0, missao = true, volumeForte = true), agora = 300_000)
+        val preAlarme = EmAndamento(Alarme(1, 6, 55, missao = false), desde = 0, musica = null, volume = 5)
+        val junto = preAlarme.juntar(Alarme(2, 7, 0, missao = true), agora = 300_000)
         assertTrue(junto.alarme.missao)
-        assertTrue(junto.alarme.volumeForte)
         assertEquals(1, junto.alarme.id) // segue o mesmo alarme, desde a mesma hora, com a música e o volume de antes
         assertEquals(0L, junto.desde)
         assertEquals(5, junto.volume)
         // Juntar com um alarme mais fraco não afrouxa nada
-        assertEquals(junto, junto.juntar(Alarme(3, 7, 5, missao = false, volumeForte = false), agora = 600_000))
+        assertEquals(junto, junto.juntar(Alarme(3, 7, 5, missao = false), agora = 600_000))
     }
 
     @Test
@@ -83,8 +82,8 @@ class AlarmeTest {
         val teste = EmAndamento(Alarme.teste(), desde = 0, musica = "content://musica/1", volume = 3)
         val junto = teste.juntar(Alarme(5, 7, 0), agora = 99)
         assertEquals(EmAndamento(Alarme(5, 7, 0), desde = 99, musica = "content://musica/1", volume = 3), junto)
-        assertEquals(META_OLHAR_MS, metaOlhar(junto.alarme)) // 20 min, não os 30 s do teste
-        assertEquals(8, junto.volumeTravado(maximo = 15)) // 50%, não os 35% do teste
+        assertEquals(META_OLHAR_MS, metaOlhar(junto.alarme)) // 40 min, não os 30 s do teste
+        assertEquals(99L, junto.desde) // a subida do volume recomeça com ele
         // Com as regras dele: alarme sem missão continua sem missão
         assertFalse(teste.juntar(Alarme(6, 7, 0, missao = false), agora = 99).alarme.missao)
         // O contrário: o teste no meio do alarme de verdade não muda nada
@@ -93,11 +92,30 @@ class AlarmeTest {
     }
 
     @Test
-    fun volumeTravadoNoTesteNoForteENoNormal() {
-        val normal = EmAndamento(Alarme(1, 7, 0, volumeForte = false), desde = 0, musica = null, volume = 4)
-        assertEquals(4, normal.volumeTravado(maximo = 15)) // o volume de antes do alarme
-        assertEquals(8, normal.juntar(Alarme(2, 7, 0, volumeForte = true), agora = 0).volumeTravado(maximo = 15)) // 50% de 15 (7,5)
-        assertEquals(5, EmAndamento(Alarme.teste(), desde = 0, musica = null, volume = 3).volumeTravado(maximo = 15)) // 35% de 15 (5,25)
+    fun volumeSobeDe10A40PorCentoEm30Segundos() {
+        // 15 degraus de volume de alarme, como o Galaxy S24 FE; igual no teste e qualquer que fosse o volume antes
+        for (em in listOf(EmAndamento(Alarme(1, 7, 0), desde = 1_000, musica = null, volume = 12), EmAndamento(Alarme.teste(), desde = 1_000, musica = null, volume = 2))) {
+            assertEquals(2, em.volumeAgora(maximo = 15, agoraMs = 1_000)) // 10% (1,5)
+            assertEquals(4, em.volumeAgora(maximo = 15, agoraMs = 16_000)) // 25% na metade
+            assertEquals(6, em.volumeAgora(maximo = 15, agoraMs = 31_000)) // 40%
+            assertEquals(6, em.volumeAgora(maximo = 15, agoraMs = 600_000)) // e fica
+            assertEquals(6, em.volumeAgora(maximo = 15, agoraMs = em.desde - 86_400_000)) // relógio voltou um dia: não baixa
+        }
+        // Remédio: de 15% a 75% em 2 min
+        val remedio = EmAndamento(Alarme(2, 8, 0, missao = false, remedio = true), desde = 0, musica = null, volume = 5)
+        assertEquals(2, remedio.volumeAgora(maximo = 15, agoraMs = 0)) // 15% (2,25)
+        assertEquals(7, remedio.volumeAgora(maximo = 15, agoraMs = 60_000)) // 45% (6,75)
+        assertEquals(11, remedio.volumeAgora(maximo = 15, agoraMs = 120_000)) // 75% (11,25)
+        assertEquals(11, remedio.volumeAgora(maximo = 15, agoraMs = 900_000))
+        // As falas saem sempre no fim da subida, mesmo logo no começo dela
+        assertEquals(6, EmAndamento(Alarme(1, 7, 0), desde = 0, musica = null, volume = 2).volumeDasFalas(maximo = 15)) // 40%
+        assertEquals(11, remedio.volumeDasFalas(maximo = 15)) // 75%
+        // Remédio junto com um alarme de música: fica a música
+        assertFalse(remedio.juntar(Alarme(3, 8, 0), agora = 10).alarme.remedio)
+        assertTrue(remedio.juntar(Alarme(4, 8, 0, remedio = true), agora = 10).alarme.remedio)
+        // Alarme salvo por uma versão antiga, com a opção de volume forte: abre igual, sem ela
+        val antigo = JSONObject("""{"id":4,"hora":5,"minuto":5,"volumeForte":true}""")
+        assertEquals(Alarme(4, 5, 5), Alarme.deJson(antigo))
     }
 
     @Test

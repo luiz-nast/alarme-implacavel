@@ -1,9 +1,7 @@
-// Compartilhado pelas telas: tema claro/escuro, cores fixas da tela do alarme, o relógio agoraACada e lidoAoVoltar.
+// Compartilhado pelas telas: tema (sempre claro), cores fixas da tela do alarme, o relógio agoraACada e lidoAoVoltar.
 package com.implacavel.alarme
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -44,33 +42,13 @@ private val Claro = lightColorScheme(
     surfaceContainerHighest = Color(0xFFF1DEDC),
 )
 
-private val Escuro = darkColorScheme(
-    primary = Color(0xFFFFB4AB),
-    onPrimary = Color(0xFF690005),
-    primaryContainer = Color(0xFF93000A),
-    onPrimaryContainer = Color(0xFFFFDAD6),
-    secondary = Color(0xFFE7BDB7),
-    onSecondary = Color(0xFF442926),
-    secondaryContainer = Color(0xFF5D3F3B),
-    onSecondaryContainer = Color(0xFFFFDAD6),
-    background = Color(0xFF1A1110),
-    onBackground = Color(0xFFF1DEDC),
-    surface = Color(0xFF1A1110),
-    onSurface = Color(0xFFF1DEDC),
-    surfaceVariant = Color(0xFF534341),
-    onSurfaceVariant = Color(0xFFD8C2BF),
-    outline = Color(0xFFA08C8A),
-    surfaceContainerLowest = Color(0xFF140C0B),
-    surfaceContainerLow = Color(0xFF231918),
-    surfaceContainer = Color(0xFF271D1C),
-    surfaceContainerHigh = Color(0xFF322827),
-    surfaceContainerHighest = Color(0xFF3D3231),
-)
-
-/** Tema do app: tons de vermelho de alarme, claro ou escuro conforme o sistema. */
+/**
+ * Tema do app: tons de vermelho de alarme, sempre claro, mesmo com o sistema no modo escuro (o dono
+ * pediu; assim o YouTube da etapa da câmera também fica claro).
+ */
 @Composable
-fun TemaImplacavel(escuro: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (escuro) Escuro else Claro, content = content)
+fun TemaImplacavel(content: @Composable () -> Unit) {
+    MaterialTheme(colorScheme = Claro, content = content)
 }
 
 /** Hora atual, que se atualiza sozinha a cada [intervaloMs] (relógio da tela do alarme, textos "toca em 9 h"). */

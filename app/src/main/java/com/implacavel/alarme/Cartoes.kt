@@ -124,13 +124,11 @@ fun CartaoAlarme(alarme: Alarme, agora: ZonedDateTime, onLigar: (Boolean) -> Uni
                     listOfNotNull(alarme.rotulo.ifBlank { null }, resumoDias(alarme.dias)).joinToString(" · "),
                     style = MaterialTheme.typography.bodyMedium,
                 )
-                val extras = listOfNotNull(
-                    "missão: STOP + 20 min de câmera".takeIf { alarme.missao },
-                    "volume forte".takeIf { alarme.volumeForte },
+                Text(
+                    if (alarme.remedio) "lembrete: toque suave" else "atividade: STOP + 40 min de câmera",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
                 )
-                if (extras.isNotEmpty()) {
-                    Text(extras.joinToString(" · "), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                }
                 if (alarme.ativo) {
                     Text(
                         "Toca ${tempoAte(agora, alarme.proximoDisparo(agora))}",

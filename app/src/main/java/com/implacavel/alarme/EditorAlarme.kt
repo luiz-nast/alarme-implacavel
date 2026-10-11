@@ -21,7 +21,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimePicker
@@ -52,8 +52,8 @@ fun EditorAlarme(
     val relogio = rememberTimePickerState(initialHour = inicial.hora, initialMinute = inicial.minuto, is24Hour = true)
     var rotulo by remember { mutableStateOf(inicial.rotulo) }
     var dias by remember { mutableStateOf(inicial.dias) }
-    var missao by remember { mutableStateOf(inicial.missao) }
-    var volumeForte by remember { mutableStateOf(inicial.volumeForte) }
+    // Ou é despertador com atividade (missão), ou lembrete de remédio: nunca os dois
+    var lembrete by remember { mutableStateOf(inicial.remedio) }
 
     Dialog(onDismissRequest = onCancelar, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
@@ -86,10 +86,9 @@ fun EditorAlarme(
                     modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                 )
                 Spacer(Modifier.height(8.dp))
-                LinhaSwitch("Missão pra desligar", "Dizer STOP e olhar 20 min pra câmera de olhos abertos", missao) { missao = it }
-                LinhaSwitch("Volume forte", "Toca a 50% do volume. Desligado, no volume atual. Nos dois casos, não dá pra abaixar", volumeForte) {
-                    volumeForte = it
-                }
+                Text("Tipo", style = MaterialTheme.typography.labelLarge, modifier = Modifier.fillMaxWidth())
+                OpcaoTipo("Despertador com atividade", "A música, dizer STOP e 40 min de câmera de olhos abertos", !lembrete) { lembrete = false }
+                OpcaoTipo("Lembrete de remédio", "Toque suave, de 15% a 75% do volume em 2 min, e um botão DESLIGAR", lembrete) { lembrete = true }
                 Spacer(Modifier.height(12.dp))
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     if (!novo) {
@@ -107,8 +106,8 @@ fun EditorAlarme(
                                 minuto = relogio.minute,
                                 rotulo = rotulo.trim(),
                                 dias = dias,
-                                missao = missao,
-                                volumeForte = volumeForte,
+                                missao = !lembrete,
+                                remedio = lembrete,
                                 ativo = true,
                             )
                             onSalvar(alarme)
@@ -145,12 +144,15 @@ private fun SeletorDias(dias: Set<Int>, onMudar: (Set<Int>) -> Unit) {
 }
 
 @Composable
-private fun LinhaSwitch(titulo: String, descricao: String, ligado: Boolean, onMudar: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+private fun OpcaoTipo(titulo: String, descricao: String, escolhida: Boolean, onEscolher: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onEscolher).padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = escolhida, onClick = onEscolher)
         Column(Modifier.weight(1f)) {
             Text(titulo, style = MaterialTheme.typography.bodyLarge)
             Text(descricao, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Switch(checked = ligado, onCheckedChange = onMudar)
     }
 }

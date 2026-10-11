@@ -3,6 +3,7 @@ package com.implacavel.alarme
 import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
+import android.media.AudioManager
 import android.util.Log
 
 /** Tag dos logs do app. Pra acompanhar um alarme: `adb logcat -s Implacavel`. */
@@ -30,6 +31,11 @@ class App : Application() {
         Ajustes.emAndamento?.let {
             Log.i(TAG, "Alarme ${it.alarme.id} foi interrompido no meio: voltando a tocar")
             Agendador.agendarRetomada(this, 2_000)
+        }
+        // O processo morreu na comemoração de um alarme cumprido: devolve o volume de antes dele
+        if (Ajustes.emAndamento == null) Ajustes.volumeParaDevolver?.let {
+            runCatching { getSystemService(AudioManager::class.java).setStreamVolume(AudioManager.STREAM_ALARM, it, 0) }
+            Ajustes.volumeParaDevolver = null
         }
     }
 }

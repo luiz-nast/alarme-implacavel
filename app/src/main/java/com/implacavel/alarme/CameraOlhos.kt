@@ -1,6 +1,8 @@
 package com.implacavel.alarme
 
+import android.os.SystemClock
 import android.util.Log
+import android.util.Range
 import androidx.annotation.OptIn
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
@@ -13,11 +15,14 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -28,13 +33,22 @@ import com.google.mlkit.vision.face.FaceDetector
 import com.google.mlkit.vision.face.FaceDetectorOptions
 import java.util.concurrent.Executors
 
-/** Detector de rosto falhando esse tanto de quadros seguidos (uns 3 s) é defeito. */
-private const val FALHAS_SEGUIDAS_MAX = 30
+/**
+ * O detector de rosto (modo preciso) olha um quadro a cada tanto, não todos: 4 por segundo bastam pro
+ * anel parar na hora e pra contagem, e antes, em todo quadro, o celular esquentava em 5 min.
+ */
+private const val ANALISE_A_CADA_MS = 250L
+
+/** Quadros por segundo da câmera: a bolinha não precisa de 30, e menos quadros esquentam menos. */
+private val QUADROS_POR_SEGUNDO = Range(15, 15)
+
+/** Detector de rosto falhando em todo quadro analisado por uns 3 s é defeito. */
+private const val FALHAS_SEGUIDAS_MAX = (3_000 / ANALISE_A_CADA_MS).toInt()
 
 /**
  * Câmera frontal com detecção de rosto (ML Kit, roda no aparelho, sem internet). A cada quadro
- * informa uma [Leitura]. Com defeito (não abre, erro grave da câmera ou o detector falhando em
- * todo quadro), informa [Leitura.SEM_CAMERA].
+ * analisado ([ANALISE_A_CADA_MS]) informa uma [Leitura]. Com defeito (não abre, erro grave da câmera
+ * ou o detector falhando em todo quadro), informa [Leitura.SEM_CAMERA].
  */
 @Composable
 fun CameraOlhos(modifier: Modifier, onLeitura: (Leitura) -> Unit) {
@@ -47,21 +61,36 @@ fun CameraOlhos(modifier: Modifier, onLeitura: (Leitura) -> Unit) {
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE // permite recortar em círculo
         }
     }
+    val preview = remember { Preview.Builder().setTargetFrameRate(QUADROS_POR_SEGUNDO).build() }
+    val analise = remember { ImageAnalysis.Builder().setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST).build() }
+    // A tela gira sem ser recriada (configChanges): sem isso, deitado, o detector veria o rosto de lado.
+    // Ler a configuração faz isto rodar de novo a cada giro
+    val rotacao = LocalConfiguration.current.let { LocalView.current.display?.rotation }
+    SideEffect {
+        rotacao?.let {
+            preview.targetRotation = it
+            analise.targetRotation = it
+        }
+    }
     DisposableEffect(dono) {
         var descartado = false
         var camera: Camera? = null
         var falhasSeguidas = 0 // só mexida na thread principal, onde o ML Kit entrega o resultado
+        var ultimaAnalise = 0L // só mexida na thread da análise
         val executor = Executors.newSingleThreadExecutor()
         val detector = FaceDetection.getClient(OPCOES_ROSTO)
         val futuro = ProcessCameraProvider.getInstance(ctx)
         futuro.addListener({
             if (descartado) return@addListener
             runCatching {
-                val preview = Preview.Builder().build().also { it.setSurfaceProvider(visor.surfaceProvider) }
-                val analise = ImageAnalysis.Builder()
-                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                    .build()
+                preview.setSurfaceProvider(visor.surfaceProvider)
                 analise.setAnalyzer(executor) { quadro ->
+                    val agora = SystemClock.elapsedRealtime()
+                    if (agora - ultimaAnalise < ANALISE_A_CADA_MS) {
+                        quadro.close() // fora da vez: descarta sem passar pelo detector
+                        return@setAnalyzer
+                    }
+                    ultimaAnalise = agora
                     analisar(
                         quadro, detector,
                         onLeitura = {
@@ -124,7 +153,7 @@ private fun analisar(quadro: ImageProxy, detector: FaceDetector, onLeitura: (Lei
 /** Considera só o maior rosto (o mais perto da câmera). */
 private fun lerRosto(rostos: List<Face>): Leitura {
     val rosto = rostos.maxByOrNull { it.boundingBox.width() } ?: return Leitura.SEM_ROSTO
-    return classificarRosto(rosto.headEulerAngleY, rosto.headEulerAngleX, rosto.leftEyeOpenProbability, rosto.rightEyeOpenProbability)
+    return classificarRosto(rosto.leftEyeOpenProbability, rosto.rightEyeOpenProbability)
 }
 
 /**

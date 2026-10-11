@@ -1,13 +1,13 @@
 // Regras da missão pra desligar o alarme (dizer STOP e olhar pra câmera). Funções puras, testadas em MissaoTest.
 package com.implacavel.alarme
 
+import java.net.URI
 import java.text.Normalizer
-import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.roundToInt
 
 /** Tempo olhando pra câmera, de olhos abertos, pra desligar o alarme. */
-const val META_OLHAR_MS = 20 * 60_000L
+const val META_OLHAR_MS = 40 * 60_000L
 
 /** No botão "Testar agora" a câmera pede só isto: teste tem que ser rápido. */
 const val META_OLHAR_TESTE_MS = 30_000L
@@ -28,7 +28,7 @@ const val DESISTENCIA_MS = 20_000L
 val BIPES_ATE_ZERAR = ((DESISTENCIA_MS - 1) / AVISO_SEM_OLHAR_MS).toInt()
 
 /** O que a câmera está vendo agora. */
-enum class Leitura { SEM_CAMERA, SEM_ROSTO, DE_LADO, OLHOS_FECHADOS, OLHANDO }
+enum class Leitura { SEM_CAMERA, SEM_ROSTO, OLHOS_FECHADOS, OLHANDO }
 
 /** Quanto tempo de olhos abertos a missão do [alarme] pede. */
 fun metaOlhar(alarme: Alarme): Long = if (alarme.deTeste) META_OLHAR_TESTE_MS else META_OLHAR_MS
@@ -39,11 +39,20 @@ fun disseStop(texto: String): Boolean {
     return Regex("\\b[ei]?stop").containsMatchIn(semAcento)
 }
 
-/** Olhando = rosto de frente (até 25° de giro) e os dois olhos abertos (probabilidade acima de 60%). */
-fun classificarRosto(giroLateral: Float, giroVertical: Float, olhoEsquerdo: Float?, olhoDireito: Float?): Leitura = when {
-    abs(giroLateral) > 25f || abs(giroVertical) > 25f -> Leitura.DE_LADO
-    (olhoEsquerdo ?: 0f) > 0.6f && (olhoDireito ?: 0f) > 0.6f -> Leitura.OLHANDO
-    else -> Leitura.OLHOS_FECHADOS
+/**
+ * Olho aberto pro ML Kit: a média dos dois olhos (probabilidade de aberto) acima disto. Olho fechado
+ * dá perto de 0. Cada olho acima de 60% obrigava a arregalar; a média acima de 30% deixava passar
+ * quem ainda estava dormindo (o dono voltou a dormir depois da missão). 45% fica no meio.
+ */
+private const val OLHO_ABERTO = 0.45f
+
+/**
+ * Olhando = os olhos abertos ([OLHO_ABERTO]), com o rosto em qualquer ângulo (não precisa estar de
+ * frente: quem está acordando não fica reto). Sem informação de nenhum olho, conta como fechado.
+ */
+fun classificarRosto(olhoEsquerdo: Float?, olhoDireito: Float?): Leitura {
+    val olhos = listOfNotNull(olhoEsquerdo, olhoDireito)
+    return if (olhos.isNotEmpty() && olhos.average() > OLHO_ABERTO) Leitura.OLHANDO else Leitura.OLHOS_FECHADOS
 }
 
 /**
@@ -51,6 +60,18 @@ fun classificarRosto(giroLateral: Float, giroVertical: Float, olhoEsquerdo: Floa
  * última conferência): só sobe se a pessoa está [olhando] agora. Sem isso, para na hora e nunca desce.
  */
 fun avancarOlhar(olhadoMs: Long, olhando: Boolean, passoMs: Long): Long = if (olhando) olhadoMs + passoMs else olhadoMs
+
+/** A cada tanto de câmera completa, a voz avisa ("10 minutes passed"). */
+const val MARCO_MS = 10 * 60_000L
+
+/**
+ * Marco de [MARCO_MS] completado quando o anel passou de [antesMs] pra [depoisMs], em minutos (10, 20,
+ * 30), ou null. O fim da [metaMs] não conta: aí o alarme já desliga.
+ */
+fun marcoCompletado(antesMs: Long, depoisMs: Long, metaMs: Long): Int? {
+    val marco = depoisMs / MARCO_MS * MARCO_MS
+    return if (marco > antesMs && marco in 1 until metaMs) (marco / 60_000).toInt() else null
+}
 
 /** Contagem na tela: depois de [AVISO_SEM_OLHAR_MS] sem olhar, os segundos que faltam pro anel zerar; antes, null. */
 fun segundosParaZerar(semOlharMs: Long): Int? =
@@ -63,3 +84,19 @@ fun segundosParaZerar(semOlharMs: Long): Int? =
  */
 fun volumeDoBipe(n: Int, maximo: Int): Int =
     (maximo * n.coerceIn(1, BIPES_ATE_ZERAR).toFloat() / BIPES_ATE_ZERAR).roundToInt().coerceAtLeast(1)
+
+/** Sites que a página do YouTube abre: o próprio YouTube e o Google (aviso de cookies e login). */
+private val SITES_DA_PAGINA = listOf("youtube.com", "youtu.be", "google.com", "google.com.br")
+
+/**
+ * Na página do YouTube da etapa da câmera, só abre (ali mesmo) link de site. Os outros ("intent:",
+ * "vnd.youtube:", "market:"...) abririam outro app por cima do alarme. Na página [principal], só o
+ * YouTube e o Google: o resto também fica sem efeito. Partes de dentro da página (anúncios, vídeos
+ * embutidos) vêm de qualquer site.
+ */
+fun linkFicaNaPagina(url: String, principal: Boolean = true): Boolean {
+    val endereco = runCatching { URI(url) }.getOrNull() ?: return false
+    if (endereco.scheme?.lowercase() !in setOf("https", "http")) return false
+    val site = endereco.host?.lowercase() ?: return false
+    return !principal || SITES_DA_PAGINA.any { site == it || site.endsWith(".$it") }
+}

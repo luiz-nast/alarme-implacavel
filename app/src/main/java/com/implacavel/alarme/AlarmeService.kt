@@ -6,8 +6,10 @@ import android.app.Notification
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.Handler
@@ -15,6 +17,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
+import android.os.UserManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -22,6 +25,7 @@ import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.io.File
 import java.time.LocalTime
 
 /**
@@ -31,7 +35,9 @@ import java.time.LocalTime
  * [AlarmeActivity] em tela cheia, e não deixa ninguém fugir:
  * - tela do alarme fechada (Home, arrastar o app, apagar a tela): em [TELA_FECHADA_MS] a música
  *   volta e a tela reabre; o anel da câmera fica onde estava;
- * - depois do "stop", a música só fica calada enquanto a câmera avisa ("olhando") que a pessoa
+ * - depois do "stop", a voz do celular dá bom dia, [PAUSA_DEPOIS_DA_SAUDACAO_MS] depois diz "Activity
+ *   starting now", toca o bipe positivo e começa a câmera; a cada 10 min completos, a voz avisa;
+ *   daí a música só fica calada enquanto a câmera avisa ("olhando") que a pessoa
  *   olha; sem aviso, a vigia bipa a cada [AVISO_SEM_OLHAR_MS], cada vez mais alto (o último, no
  *   volume máximo do celular), e em [DESISTENCIA_MS] religa a música (o anel zera);
  * - a cada [RENOVAR_MS], empurra pra frente a retomada no AlarmManager: se o app cair, travar ou
@@ -59,6 +65,7 @@ class AlarmeService : Service() {
         private const val EXTRA_VOLUME = "volume"
         private const val EXTRA_ABERTA = "aberta"
         private const val EXTRA_OLHADO = "olhado"
+        private const val EXTRA_COMEMORAR = "comemorar"
 
         /**
          * Tela do alarme fechada no meio: tempo até a música voltar e a tela reabrir. O Android ainda leva
@@ -74,6 +81,21 @@ class AlarmeService : Service() {
 
         private const val LIMITE_QUEDAS = 2
 
+        /** Entre a saudação falada e o "Activity starting now". */
+        private const val PAUSA_DEPOIS_DA_SAUDACAO_MS = 1_500L
+
+        /** Se os sons do fim travarem, o alarme termina assim mesmo depois disso. */
+        private const val COMEMORACAO_MAX_MS = 20_000L
+
+        /** Se a voz travar, a câmera começa assim mesmo depois disso. */
+        private const val SAUDACAO_MAX_MS = 20_000L
+
+        /** Falas fixas, gravadas assim que a voz fica pronta: o início e os avisos de 10, 20 e 30 min. */
+        private const val FALA_DO_INICIO = "inicio"
+        private const val FALA_DO_FIM = "fim"
+        private val FALAS_FIXAS = mapOf(FALA_DO_INICIO to FALA_INICIO, FALA_DO_FIM to FALA_FIM) +
+            (1 until (META_OLHAR_MS / MARCO_MS).toInt()).associate { "minutos_${it * 10}" to falaDosMinutos(it * 10) }
+
         private val _tocando = MutableStateFlow<Alarme?>(null)
 
         /** Alarme tocando agora (null = nenhum). A AlarmeActivity e a tela principal observam isso. */
@@ -83,6 +105,16 @@ class AlarmeService : Service() {
 
         /** true = a pessoa já disse "stop" e a música está calada: a tela do alarme mostra a etapa da câmera. */
         val silenciado: StateFlow<Boolean> = _silenciado.asStateFlow()
+
+        private val _saudando = MutableStateFlow(false)
+
+        /** true = acabou de dizer "stop" e a voz está dando bom dia: a tela mostra a saudação, ainda sem câmera. */
+        val saudando: StateFlow<Boolean> = _saudando.asStateFlow()
+
+        private val _comemorando = MutableStateFlow(false)
+
+        /** true = a missão foi cumprida e o app comemora (bipe leve, parabéns e o estouro) antes de fechar. */
+        val comemorando: StateFlow<Boolean> = _comemorando.asStateFlow()
 
         private val _ultimoOlhar = MutableStateFlow(0L)
 
@@ -110,7 +142,9 @@ class AlarmeService : Service() {
         }
 
         /** O anel da câmera fechou (ou a câmera deu defeito): fim do alarme. */
-        fun missaoCumprida(ctx: Context) { ctx.startService(comando(ctx, ACAO_CONCLUIR)) }
+        fun missaoCumprida(ctx: Context, comemorar: Boolean = true) {
+            ctx.startService(comando(ctx, ACAO_CONCLUIR).putExtra(EXTRA_COMEMORAR, comemorar))
+        }
 
         /** Botão DESLIGAR. Só vale pra alarme sem missão (ou liberado por defeito). */
         fun desligar(ctx: Context) { ctx.startService(comando(ctx, ACAO_DESLIGAR)) }
@@ -139,10 +173,15 @@ class AlarmeService : Service() {
     }
 
     private lateinit var sirene: Sirene
+    private var voz: Voz? = null // só depois do primeiro desbloqueio ([prepararVoz])
+    private var rodadas = 0 // saudações pedidas: cada uma grava num arquivo seu
+    private var esperaDesbloqueio: BroadcastReceiver? = null
     private lateinit var processador: PowerManager.WakeLock
     private var telaAberta = true
     private var foraAte = 0L // SystemClock.elapsedRealtime
     private var bipes = 0 // da vigia, desde o último sinal de "olhando"
+    private var cumprido = false // depois disso, só a comemoração: nada traz a música de volta
+    private var volumeAoFim: Int? = null // o volume de antes do alarme cumprido, devolvido ao fechar
     private val handler = Handler(Looper.getMainLooper())
 
     /**
@@ -180,7 +219,7 @@ class AlarmeService : Service() {
 
     /**
      * A tela do alarme sumiu e não voltou: música de volta e tela reaberta por uma nova notificação em
-     * tela cheia. O anel da câmera fica onde estava (com 20 min, uma ligação custaria tudo).
+     * tela cheia. O anel da câmera fica onde estava (com 40 min, uma ligação custaria tudo).
      */
     private val chamarDeVolta = Runnable {
         val alarme = _tocando.value ?: return@Runnable
@@ -192,9 +231,29 @@ class AlarmeService : Service() {
     override fun onCreate() {
         super.onCreate()
         sirene = Sirene(this)
+        prepararVoz()
         processador = getSystemService(PowerManager::class.java)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AlarmeImplacavel:tocando")
             .apply { setReferenceCounted(false) }
+    }
+
+    /**
+     * A voz (falas do alarme) abre só com o celular desbloqueado desde que ligou: antes disso o
+     * sintetizador não abre e os arquivos não podem ser gravados. Alarme tocando antes do primeiro
+     * desbloqueio: a voz abre no desbloqueio, que a missão pede antes do STOP (EtapaDesbloquear).
+     */
+    private fun prepararVoz() {
+        if (getSystemService(UserManager::class.java).isUserUnlocked) {
+            voz = Voz(this, FALAS_FIXAS)
+            return
+        }
+        esperaDesbloqueio = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context, intent: Intent) {
+                unregisterReceiver(this)
+                esperaDesbloqueio = null
+                if (voz == null) voz = Voz(this@AlarmeService, FALAS_FIXAS)
+            }
+        }.also { ContextCompat.registerReceiver(this, it, IntentFilter(Intent.ACTION_USER_UNLOCKED), ContextCompat.RECEIVER_NOT_EXPORTED) }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -207,7 +266,7 @@ class AlarmeService : Service() {
             acao == ACAO_TOCAR -> iniciar()
             // Comando atrasado, de quando o alarme já tinha parado: só fecha o serviço
             alarme == null -> pararServico()
-            acao == ACAO_CONCLUIR -> concluir()
+            acao == ACAO_CONCLUIR -> concluir(comemorar = intent.getBooleanExtra(EXTRA_COMEMORAR, false))
             // Nem repetindo o DESLIGAR de outro alarme (a notificação sempre traz o mesmo) dá pra fugir da missão
             acao == ACAO_DESLIGAR -> if (!alarme.missao) concluir()
             // Desde o Android 14 dá pra arrastar a notificação pro lado; ela volta enquanto o alarme durar
@@ -227,8 +286,14 @@ class AlarmeService : Service() {
         Log.i(TAG, "Serviço: parou")
         handler.removeCallbacksAndMessages(null)
         notificacoes().cancel(Notificacoes.ID_CHAMADA)
-        sirene.desligar()
+        // Fechado no meio da comemoração (ex.: o Android encerrou o serviço): o volume de antes volta igual
+        sirene.desligar(volumeAntes = volumeAoFim.takeIf { cumprido })
+        if (cumprido) Ajustes.volumeParaDevolver = null
+        esperaDesbloqueio?.let { unregisterReceiver(it) }
+        voz?.desligar()
         _silenciado.value = false
+        _saudando.value = false
+        _comemorando.value = false
         _olhado.value = 0
         _tocando.value = null
         if (processador.isHeld) processador.release()
@@ -237,6 +302,12 @@ class AlarmeService : Service() {
 
     private fun iniciar() {
         val em = Ajustes.emAndamento
+        // Comemorando um alarme cumprido: um comando atrasado ou outro alarme que disparou agora não
+        // corta a comemoração; o outro alarme toca logo depois dela ([encerrar])
+        if (cumprido) {
+            mostrarNotificacao(_tocando.value ?: Alarme.teste())
+            return
+        }
         if (em == null) {
             // Missão cumprida enquanto o comando chegava. Depois de startForegroundService o Android
             // exige mostrar a notificação, mesmo pra parar em seguida
@@ -252,9 +323,10 @@ class AlarmeService : Service() {
         sirene.preparar(em, comeco = !jaTocava)
         // Retomada à toa, ou outro alarme disparou no meio (a foto já juntou os dois): segue de onde está
         if (jaTocava) return
-        Log.i(TAG, "Serviço: tocando \"${alarme.nome}\" (missão=${alarme.missao}, volume forte=${alarme.volumeForte}, quedas=$quedas)")
+        Log.i(TAG, "Serviço: tocando \"${alarme.nome}\" (missão=${alarme.missao}, remédio=${alarme.remedio}, quedas=$quedas)")
         telaAberta = true
         _silenciado.value = false
+        _saudando.value = false
         sirene.tocar()
         handler.post(renovar)
     }
@@ -269,6 +341,7 @@ class AlarmeService : Service() {
     }
 
     private fun telaMudou(aberta: Boolean) {
+        if (cumprido) return
         Log.i(TAG, "Tela do alarme: ${if (aberta) "aberta" else "fechada"}")
         telaAberta = aberta
         handler.removeCallbacks(chamarDeVolta)
@@ -282,17 +355,56 @@ class AlarmeService : Service() {
         }
     }
 
-    /** A pessoa disse "stop": a música para e a vigia começa a contar. O volume continua travado. */
+    /**
+     * A pessoa disse "stop": a música para e a voz dá bom dia ([textoDaSaudacao]); [PAUSA_DEPOIS_DA_SAUDACAO_MS]
+     * depois que ela termina, diz [FALA_INICIO], toca o bipe positivo e aí começa a câmera e a vigia.
+     * Sem voz, só a pausa e o bipe.
+     */
     private fun silenciarMusica() {
+        if (cumprido) return
+        if (_silenciado.value) return // toque repetido no botão, ou o mesmo STOP chegando de novo
         sirene.calar()
         _silenciado.value = true
+        _saudando.value = true
+        handler.postDelayed(comecarAtividade, SAUDACAO_MAX_MS)
+        val falar: (File?) -> Unit = { arquivo ->
+            if (_saudando.value) sirene.falar(arquivo) { handler.postDelayed(anunciarInicio, PAUSA_DEPOIS_DA_SAUDACAO_MS) }
+        }
+        voz?.gravar("saudacao_${++rodadas}", textoDaSaudacao(LocalTime.now()), falar) ?: falar(null)
+    }
+
+    /** "Activity starting now", o bipe positivo e a câmera. */
+    private val anunciarInicio: Runnable = Runnable {
+        if (!_saudando.value) return@Runnable
+        sirene.falar(voz?.fixa(FALA_DO_INICIO)) {
+            if (_saudando.value) sirene.positivo { comecarAtividade.run() }
+        }
+    }
+
+    /** Fim da saudação: a tela passa pra câmera e a vigia começa a contar. */
+    private val comecarAtividade: Runnable = Runnable {
+        if (!_saudando.value) return@Runnable
+        Log.i(TAG, "Missão: saudação feita, começa a câmera")
+        _saudando.value = false
+        handler.removeCallbacks(comecarAtividade)
+        handler.removeCallbacks(anunciarInicio)
         adiarVigia()
     }
 
-    /** Sinal de "olhando" da etapa da câmera: guarda o tempo já somado no anel e zera a contagem da vigia. */
+    /**
+     * Sinal de "olhando" da etapa da câmera: guarda o tempo já somado no anel e zera a contagem da vigia.
+     * A cada 10 min completos ([marcoCompletado]), a voz avisa ("10 minutes passed").
+     */
     private fun olhou(olhadoMs: Long) {
-        if (!_silenciado.value) return // sinal atrasado de uma rodada que já acabou
-        _olhado.value = maxOf(_olhado.value, olhadoMs)
+        if (!_silenciado.value || _saudando.value || cumprido) return // sinal atrasado de uma rodada que já acabou
+        val antes = _olhado.value
+        _olhado.value = maxOf(antes, olhadoMs)
+        _tocando.value?.let { alarme ->
+            marcoCompletado(antes, _olhado.value, metaOlhar(alarme))?.let { minutos ->
+                Log.i(TAG, "Missão: $minutos min de câmera")
+                sirene.falar(voz?.fixa("minutos_$minutos"))
+            }
+        }
         adiarVigia()
     }
 
@@ -306,7 +418,13 @@ class AlarmeService : Service() {
 
     /** Música de volta no volume cheio; se estava calada, a missão volta pra etapa de falar. O anel não muda aqui. */
     private fun religarMusica() {
+        if (cumprido) return
         handler.removeCallbacks(vigia)
+        // No meio da saudação: ela para (a música cala a fala) e a câmera não começa
+        handler.removeCallbacks(comecarAtividade)
+        handler.removeCallbacks(anunciarInicio)
+        _saudando.value = false
+        voz?.cancelar()
         if (_silenciado.value) {
             _silenciado.value = false
             sirene.tocar()
@@ -316,12 +434,36 @@ class AlarmeService : Service() {
     }
 
     /** Missão cumprida (ou DESLIGAR, em alarme sem missão): o único fim do alarme. A limpeza acontece em [onDestroy]. */
-    private fun concluir() {
+    private fun concluir(comemorar: Boolean = false) {
+        if (cumprido) return
+        cumprido = true
         Log.i(TAG, "Serviço: alarme cumprido")
         handler.removeCallbacksAndMessages(null) // nenhuma renovação atrasada pode rearmar a retomada
-        sirene.desligar(volumeAntes = Ajustes.emAndamento?.volume)
+        // Cumprido já fica gravado: se o app cair na comemoração, o alarme não volta
+        volumeAoFim = Ajustes.emAndamento?.volume
+        Ajustes.volumeParaDevolver = volumeAoFim
         Ajustes.emAndamento = null
         Agendador.cancelarRetomada(this)
+        if (!comemorar) return encerrar()
+        // Missão cumprida: bipe leve, a fala de parabéns e o estouro, aí fecha
+        _comemorando.value = true
+        sirene.calar()
+        handler.postDelayed(::encerrar, COMEMORACAO_MAX_MS)
+        sirene.leve { sirene.falar(voz?.fixa(FALA_DO_FIM)) { sirene.comemoracao(::encerrar) } }
+    }
+
+    /**
+     * O fim de verdade: devolve o volume de antes do alarme e fecha o serviço (a limpeza acontece em
+     * [onDestroy]). Se outro alarme disparou na comemoração, ele toca em instantes, pela retomada.
+     */
+    private fun encerrar() {
+        handler.removeCallbacksAndMessages(null)
+        sirene.desligar(volumeAntes = volumeAoFim)
+        Ajustes.volumeParaDevolver = null
+        Ajustes.emAndamento?.let {
+            Log.i(TAG, "Serviço: outro alarme disparou na comemoração, toca em seguida")
+            Agendador.agendarRetomada(this, 0)
+        }
         pararServico()
     }
 

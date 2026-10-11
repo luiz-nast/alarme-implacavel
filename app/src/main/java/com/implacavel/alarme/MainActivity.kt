@@ -2,9 +2,11 @@ package com.implacavel.alarme
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Color
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -44,7 +46,8 @@ class MainActivity : ComponentActivity() {
         // abrir, não ao recriar a tela (girar o celular): reagendar um alarme segundos depois da hora
         // em que ele deveria tocar o joga pro dia seguinte.
         if (savedInstanceState == null) Agendador.reagendarTodos(this)
-        enableEdgeToEdge()
+        // App sempre claro: ícones escuros na barra de cima, mesmo com o sistema no modo escuro
+        enableEdgeToEdge(SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT), SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT))
         setContent { TemaImplacavel { TelaPrincipal() } }
     }
 }

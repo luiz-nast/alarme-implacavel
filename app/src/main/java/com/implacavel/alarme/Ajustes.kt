@@ -35,6 +35,15 @@ object Ajustes {
             if (valor == null) remove("alarmeEmAndamento") else putString("alarmeEmAndamento", valor.paraJson().toString())
         }
 
+    /**
+     * Volume de alarme de antes de um alarme que já foi cumprido mas ainda está comemorando (os sons do
+     * fim tocam a 40%). Gravado antes de apagar o [emAndamento]: se o app morrer na comemoração, o [App]
+     * devolve o volume ao voltar, e um alarme que dispare nesse meio guarda este como o "de antes".
+     */
+    var volumeParaDevolver: Int?
+        get() = prefs.getInt("volumeParaDevolver", -1).takeIf { it >= 0 }
+        set(valor) = prefs.edit(commit = true) { if (valor == null) remove("volumeParaDevolver") else putInt("volumeParaDevolver", valor) }
+
     /** Chamado uma vez em [App.onCreate]. */
     fun carregar(ctx: Context) {
         prefs = ctx.prefsProtegidas("ajustes")

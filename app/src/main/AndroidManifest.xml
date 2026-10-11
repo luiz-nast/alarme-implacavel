@@ -19,6 +19,8 @@
     <!-- Missão pra desligar: ouvir "stop" e ver os olhos abertos pela câmera frontal -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- O YouTube ao lado da câmera, na etapa da câmera (PaginaYoutube.kt) -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <!-- Sem câmera ou microfone o app ainda instala; a missão cai pra um botão -->
     <uses-feature
@@ -35,6 +37,10 @@
     <queries>
         <intent>
             <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <!-- E o sintetizador de voz, pra saudação falada depois do STOP -->
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
     </queries>
 
@@ -59,10 +65,11 @@
 
         <!-- Tela do alarme: aparece por cima da tela de bloqueio e funciona antes do primeiro desbloqueio.
              No Android 8.0 (API 26) o mesmo efeito vem das flags de janela em AlarmeActivity.acordarTela(). -->
-        <!-- configChanges: girar o celular não recria a tela, então câmera e microfone não reiniciam -->
+        <!-- configChanges: girar o celular ou trocar o modo escuro (o app é sempre claro) não recria a tela,
+             então câmera, microfone e o vídeo do YouTube não reiniciam -->
         <activity
             android:name=".AlarmeActivity"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
             tools:targetApi="27"
             android:directBootAware="true"
             android:excludeFromRecents="true"

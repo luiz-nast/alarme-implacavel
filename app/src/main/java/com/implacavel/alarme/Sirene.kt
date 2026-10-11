@@ -17,12 +17,14 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import android.util.Log
 import androidx.core.net.toUri
+import java.io.File
 
 /**
- * O barulho do alarme: música ou toque em loop, bipes de aviso, vibração contínua, e do começo ao
- * fim (inclusive com a música calada depois do "stop") outras mídias pausadas e volume travado
- * ([EmAndamento.volumeTravado]). Só enquanto toca, cada bipe põe o volume de alarme do celular no
- * seu degrau, do levinho ao máximo, por cima da trava. Usada só pelo [AlarmeService].
+ * O barulho do alarme: música ou toque em loop, falas e bipes, vibração contínua, e do começo ao fim
+ * (inclusive com a música calada depois do "stop") outras mídias pausadas. Enquanto a música ou uma
+ * fala toca, o volume de alarme fica travado e subindo aos poucos ([EmAndamento.volumeAgora]); calado
+ * (na etapa da câmera, com o YouTube), o volume é da pessoa. Só enquanto toca, cada bipe põe o volume
+ * de alarme do celular no seu degrau, do levinho ao máximo. Usada só pelo [AlarmeService].
  *
  * Tudo usa USAGE_ALARM: o volume de alarme não depende do modo silencioso, e o Não Perturbe
  * deixa passar quando "alarmes" estão permitidos (o padrão do Android). E todo som sai no
@@ -33,37 +35,65 @@ class Sirene(private val ctx: Context) {
     private val handler = Handler(Looper.getMainLooper())
     private var player: MediaPlayer? = null
     private var bipador: MediaPlayer? = null
+    private var falante: MediaPlayer? = null
     private var vibrador: Vibrator? = null
     private var foco: AudioFocusRequest? = null
     private var musica: String? = null
-    private var volumeTravado = 0
+    private var foto: EmAndamento? = null
+    private var fator = 1f // volume da música relativo ao de alarme ([volume])
     private var volumeAntesDoBipe: Int? = null // só enquanto um bipe toca no degrau dele
 
-    /** Desfaz a cada segundo qualquer tentativa de abaixar o volume do alarme. Durante um bipe, quem manda é ele. */
+    /** O volume de alarme de agora, pela subida do alarme (30 s no normal, 2 min no remédio; veja [EmAndamento.volumeAgora]). */
+    private fun piso() = foto?.volumeAgora(audio.getStreamMaxVolume(AudioManager.STREAM_ALARM), System.currentTimeMillis()) ?: 0
+
+    /**
+     * A cada segundo, enquanto a música ou uma fala toca, sobe o volume junto com a subida e desfaz
+     * qualquer tentativa de abaixar. Calado, não mexe (o volume é da pessoa); durante um bipe, quem manda é ele.
+     */
     private val travarVolume = object : Runnable {
         override fun run() {
-            if (volumeAntesDoBipe == null && audio.getStreamVolume(AudioManager.STREAM_ALARM) < volumeTravado) {
-                runCatching { audio.setStreamVolume(AudioManager.STREAM_ALARM, volumeTravado, 0) }
+            when {
+                volumeAntesDoBipe != null -> {}
+                falante != null -> subirAte(volumeDasFalas())
+                player != null -> subirAoPiso()
             }
             handler.postDelayed(this, 1_000)
         }
     }
 
-    /** Fim do bipe: o volume de alarme volta ao de antes dele, nunca abaixo da trava. */
+    private fun subirAoPiso() = subirAte(piso())
+
+    private fun subirAte(volume: Int) {
+        if (audio.getStreamVolume(AudioManager.STREAM_ALARM) < volume) runCatching { audio.setStreamVolume(AudioManager.STREAM_ALARM, volume, 0) }
+    }
+
+    /** As falas e os sons de aviso saem sempre no volume do fim da subida (40%), mesmo com ela no começo. */
+    private fun volumeDasFalas() = foto?.volumeDasFalas(audio.getStreamMaxVolume(AudioManager.STREAM_ALARM)) ?: 0
+
+    /** Fim do bipe: o volume de alarme volta ao de antes dele. */
     private val voltarDoBipe = Runnable {
-        volumeAntesDoBipe?.let { runCatching { audio.setStreamVolume(AudioManager.STREAM_ALARM, maxOf(it, volumeTravado), 0) } }
+        volumeAntesDoBipe?.let { runCatching { audio.setStreamVolume(AudioManager.STREAM_ALARM, it, 0) } }
         volumeAntesDoBipe = null
     }
 
     /**
      * Música e volume vêm da foto do alarme [em]; a trava do volume vale até [desligar]. No [comeco]
-     * (o disparo, ou a volta depois de o app cair), o volume vai pro da foto: assim um app que caiu no
-     * meio de um bipe não deixa o alarme preso no degrau dele.
+     * (o disparo, ou a volta depois de o app cair), o volume vai pro de agora, exato: começa baixo mesmo
+     * com o celular mais alto, e um app que caiu no meio de um bipe não deixa o alarme preso no degrau dele.
      */
     fun preparar(em: EmAndamento, comeco: Boolean) {
+        val trocouSom = foto != null && foto?.alarme?.remedio != em.alarme.remedio
         musica = em.musica
-        volumeTravado = em.volumeTravado(audio.getStreamMaxVolume(AudioManager.STREAM_ALARM))
-        if (comeco) runCatching { audio.setStreamVolume(AudioManager.STREAM_ALARM, maxOf(em.volume, volumeTravado), 0) }
+        foto = em
+        if (comeco) runCatching { audio.setStreamVolume(AudioManager.STREAM_ALARM, piso(), 0) }
+        // Outro alarme juntou no meio e trocou o som (música ↔ toque de remédio): troca já, se está tocando
+        if (trocouSom) player?.let {
+            runCatching { it.stop() }
+            it.release()
+            player = null
+            tocarSom()
+            player?.setVolume(fator, fator)
+        }
         handler.removeCallbacks(travarVolume)
         handler.post(travarVolume)
     }
@@ -71,6 +101,8 @@ class Sirene(private val ctx: Context) {
     /** Som e vibração (do começo, se já estavam tocando). */
     fun tocar() {
         calar()
+        fator = 1f // a música nova começa no volume cheio
+        subirAoPiso() // calado, o volume era da pessoa (ex.: abaixou pro YouTube)
         // Foco de áudio pausa a música ou o vídeo de outros apps até o alarme acabar ([desligar]).
         // Pedido de novo a cada vez: se outro app tomou o foco no meio, ele pausa de novo
         val pedido = foco ?: AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
@@ -91,6 +123,8 @@ class Sirene(private val ctx: Context) {
         player = null
         bipador?.release()
         bipador = null
+        falante?.release()
+        falante = null
         handler.removeCallbacks(voltarDoBipe)
         voltarDoBipe.run()
         vibrador?.cancel()
@@ -99,12 +133,14 @@ class Sirene(private val ctx: Context) {
 
     /** Volume da música, de 0 a 1, relativo ao volume de alarme (a missão abaixa pra ouvir a voz). */
     fun volume(fator: Float) {
+        this.fator = fator
         player?.setVolume(fator, fator)
     }
 
     /**
-     * Bipe curto número [n] da vigia (a pessoa parou de olhar pra câmera): por [BIPE_MS], o volume de
-     * alarme fica no degrau dele ([volumeDoBipe]), por cima da trava; depois, volta ao de antes.
+     * Bipe curto número [n] da vigia (a pessoa parou de olhar pra câmera): enquanto ele toca (e mais
+     * [FOLGA_BIPE_MS]), o volume de alarme fica no degrau dele ([volumeDoBipe]), por cima da trava;
+     * depois, volta ao de antes. O último, já no volume máximo, só fica mais alto com um som mais forte.
      */
     fun bipe(n: Int) {
         val maximo = audio.getStreamMaxVolume(AudioManager.STREAM_ALARM)
@@ -113,9 +149,36 @@ class Sirene(private val ctx: Context) {
         runCatching { audio.setStreamVolume(AudioManager.STREAM_ALARM, degrau, 0) }
         Log.i(TAG, "Sirene: bipe $n no volume $degrau de $maximo")
         bipador?.release()
-        bipador = tocarArquivo(somDoApp(R.raw.bipe), emLoop = false)
+        bipador = tocarArquivo(somDoApp(if (n >= BIPES_ATE_ZERAR) R.raw.bipe_final else R.raw.bipe), emLoop = false)
         handler.removeCallbacks(voltarDoBipe)
-        handler.postDelayed(voltarDoBipe, BIPE_MS)
+        handler.postDelayed(voltarDoBipe, (bipador?.duration?.coerceAtLeast(0) ?: 0) + FOLGA_BIPE_MS)
+    }
+
+    /** Toca uma vez uma fala gravada em [arquivo] (sem arquivo, só segue); [aoTerminar] quando acaba ou se não deu pra tocar. */
+    fun falar(arquivo: File?, aoTerminar: () -> Unit = {}) =
+        if (arquivo == null) aoTerminar() else tocarUmaVez(Uri.fromFile(arquivo), aoTerminar)
+
+    /** O bipe positivo de "pode começar", antes da câmera. */
+    fun positivo(aoTerminar: () -> Unit) = tocarUmaVez(somDoApp(R.raw.positivo), aoTerminar)
+
+    /** O bipe leve antes da fala de parabéns, no fim da atividade. */
+    fun leve(aoTerminar: () -> Unit) = tocarUmaVez(somDoApp(R.raw.leve), aoTerminar)
+
+    /** O estouro de comemoração, depois da fala de parabéns. */
+    fun comemoracao(aoTerminar: () -> Unit) = tocarUmaVez(somDoApp(R.raw.comemoracao), aoTerminar)
+
+    /** Fala ou som de aviso, uma vez, exatamente no volume das falas (travado enquanto toca). */
+    private fun tocarUmaVez(uri: Uri, aoTerminar: () -> Unit) {
+        falante?.release()
+        runCatching { audio.setStreamVolume(AudioManager.STREAM_ALARM, volumeDasFalas(), 0) }
+        falante = tocarArquivo(uri, emLoop = false)?.apply {
+            setOnCompletionListener {
+                it.release()
+                if (falante === it) falante = null
+                aoTerminar()
+            }
+        }
+        if (falante == null) aoTerminar()
     }
 
     /** Fim: cala, solta a trava e as outras mídias e, com [volumeAntes], devolve o volume de alarme de antes. */
@@ -128,12 +191,12 @@ class Sirene(private val ctx: Context) {
     }
 
     /**
-     * A música da foto do alarme; senão o toque de alarme do celular; se nada puder ser lido
-     * (ex.: antes do primeiro desbloqueio), os bipes do app.
+     * A música da foto do alarme (no remédio, o toque suave do app); senão o toque de alarme do
+     * celular; se nada puder ser lido (ex.: antes do primeiro desbloqueio), os bipes do app.
      */
     private fun tocarSom() {
         val candidatos = listOfNotNull(
-            musica?.toUri(),
+            if (foto?.alarme?.remedio == true) somDoApp(R.raw.lembrete) else musica?.toUri(),
             RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM),
             RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE),
             somDoApp(R.raw.alarme_reserva),
@@ -196,8 +259,8 @@ class Sirene(private val ctx: Context) {
     }
 
     private companion object {
-        /** Quanto tempo o volume fica no degrau do bipe: o som dura 0,32 s, e o resto é folga pra ele sair do alto-falante. */
-        const val BIPE_MS = 1_000L
+        /** Depois do som do bipe, quanto o volume ainda fica no degrau dele: folga pro som sair do alto-falante. */
+        const val FOLGA_BIPE_MS = 700L
 
         val ATRIBUTOS: AudioAttributes = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_ALARM)

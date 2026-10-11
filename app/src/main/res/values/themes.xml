@@ -3,7 +3,8 @@
         <item name="android:windowBackground">@color/fundo_claro</item>
     </style>
 
-    <style name="Tema.Alarme" parent="android:Theme.Material.NoActionBar">
+    <!-- Claro: o YouTube da etapa da câmera (WebView) segue o tema da tela e também fica claro -->
+    <style name="Tema.Alarme" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/fundo_alarme</item>
     </style>
 </resources>
