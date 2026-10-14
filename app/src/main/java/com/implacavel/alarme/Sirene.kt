@@ -36,6 +36,7 @@ class Sirene(private val ctx: Context) {
     private var player: MediaPlayer? = null
     private var bipador: MediaPlayer? = null
     private var falante: MediaPlayer? = null
+    private var volumeDoFalante = 0 // o da voz ou o dos avisos, conforme o que o [falante] toca
     private var vibrador: Vibrator? = null
     private var foco: AudioFocusRequest? = null
     private var musica: String? = null
@@ -54,7 +55,7 @@ class Sirene(private val ctx: Context) {
         override fun run() {
             when {
                 volumeAntesDoBipe != null -> {}
-                falante != null -> subirAte(volumeDasFalas())
+                falante != null -> subirAte(volumeDoFalante)
                 player != null -> subirAoPiso()
             }
             handler.postDelayed(this, 1_000)
@@ -67,8 +68,9 @@ class Sirene(private val ctx: Context) {
         if (audio.getStreamVolume(AudioManager.STREAM_ALARM) < volume) runCatching { audio.setStreamVolume(AudioManager.STREAM_ALARM, volume, 0) }
     }
 
-    /** As falas e os sons de aviso saem sempre no volume do fim da subida (40%), mesmo com ela no começo. */
-    private fun volumeDasFalas() = foto?.volumeDasFalas(audio.getStreamMaxVolume(AudioManager.STREAM_ALARM)) ?: 0
+    /** Os sons de aviso saem sempre no volume do fim da subida (40%), mesmo com ela no começo; a voz, um pouco abaixo (30%). */
+    private fun volumeDosAvisos() = foto?.volumeDosAvisos(audio.getStreamMaxVolume(AudioManager.STREAM_ALARM)) ?: 0
+    private fun volumeDaVoz() = foto?.volumeDaVoz(audio.getStreamMaxVolume(AudioManager.STREAM_ALARM)) ?: 0
 
     /** Fim do bipe: o volume de alarme volta ao de antes dele. */
     private val voltarDoBipe = Runnable {
@@ -156,10 +158,10 @@ class Sirene(private val ctx: Context) {
 
     /** Toca uma vez uma fala gravada em [arquivo] (sem arquivo, só segue); [aoTerminar] quando acaba ou se não deu pra tocar. */
     fun falar(arquivo: File?, aoTerminar: () -> Unit = {}) =
-        if (arquivo == null) aoTerminar() else tocarUmaVez(Uri.fromFile(arquivo), aoTerminar)
+        if (arquivo == null) aoTerminar() else tocarUmaVez(Uri.fromFile(arquivo), volumeDaVoz(), aoTerminar)
 
     /** O bipe positivo de "pode começar", antes da câmera. */
-    fun positivo(aoTerminar: () -> Unit) = tocarUmaVez(somDoApp(R.raw.positivo), aoTerminar)
+    fun positivo(aoTerminar: () -> Unit) = tocarUmaVez(somDoApp(R.raw.positivo), volumeDosAvisos(), aoTerminar)
 
     /**
      * Apito alto [n] (1 a 3) da verificação do meio, sem resposta: o som do último bipe da vigia, nos três
@@ -168,18 +170,19 @@ class Sirene(private val ctx: Context) {
     fun apito(n: Int) = bipe(BIPES_ATE_ZERAR - 3 + n, R.raw.bipe_final)
 
     /** O "plim" de uma frase repetida certa, na verificação do meio. */
-    fun acerto(aoTerminar: () -> Unit) = tocarUmaVez(somDoApp(R.raw.acerto), aoTerminar)
+    fun acerto(aoTerminar: () -> Unit) = tocarUmaVez(somDoApp(R.raw.acerto), volumeDosAvisos(), aoTerminar)
 
     /** O bipe leve antes da fala de parabéns, no fim da atividade (e antes da verificação do meio). */
-    fun leve(aoTerminar: () -> Unit) = tocarUmaVez(somDoApp(R.raw.leve), aoTerminar)
+    fun leve(aoTerminar: () -> Unit) = tocarUmaVez(somDoApp(R.raw.leve), volumeDosAvisos(), aoTerminar)
 
     /** O estouro de comemoração, depois da fala de parabéns. */
-    fun comemoracao(aoTerminar: () -> Unit) = tocarUmaVez(somDoApp(R.raw.comemoracao), aoTerminar)
+    fun comemoracao(aoTerminar: () -> Unit) = tocarUmaVez(somDoApp(R.raw.comemoracao), volumeDosAvisos(), aoTerminar)
 
-    /** Fala ou som de aviso, uma vez, exatamente no volume das falas (travado enquanto toca). */
-    private fun tocarUmaVez(uri: Uri, aoTerminar: () -> Unit) {
+    /** Fala ou som de aviso, uma vez, exatamente no [volume] (travado enquanto toca). */
+    private fun tocarUmaVez(uri: Uri, volume: Int, aoTerminar: () -> Unit) {
         falante?.release()
-        runCatching { audio.setStreamVolume(AudioManager.STREAM_ALARM, volumeDasFalas(), 0) }
+        volumeDoFalante = volume
+        runCatching { audio.setStreamVolume(AudioManager.STREAM_ALARM, volume, 0) }
         falante = tocarArquivo(uri, emLoop = false)?.apply {
             setOnCompletionListener {
                 it.release()

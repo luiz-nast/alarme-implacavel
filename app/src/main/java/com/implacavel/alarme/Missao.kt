@@ -301,8 +301,9 @@ fun EtapaFim() {
  * recebido pelo serviço ([AlarmeService.ultimoOlhar]); bipes e zerar são da vigia de lá.
  *
  * Deslizando pra direita, a página do [youtube]: a câmera vira uma bolinha no canto (CameraMovel) e
- * continua valendo. [pagina] é a moldura das telas do alarme (hora em cima, a etapa embaixo), que
- * rola com [rolagem].
+ * continua valendo. Lá o deslize de lado fica desligado (o dedo é dos vídeos: um Short puxado pra cima
+ * um pouco torto passava de página); volta-se tocando na bolinha ou no voltar. [pagina] é a moldura das
+ * telas do alarme (hora em cima, a etapa embaixo), que rola com [rolagem].
  */
 @Composable
 fun EtapaOlhar(
@@ -397,7 +398,8 @@ fun EtapaOlhar(
         if (!youtube.voltar()) escopo.launch { paginas.animateScrollToPage(PAGINA_CAMERA) }
     }
     Box(Modifier.fillMaxSize()) {
-        HorizontalPager(paginas, Modifier.fillMaxSize(), beyondViewportPageCount = 1) { p ->
+        // Desliga só quando a página do YouTube firma: o deslize que leva até ela continua inteiro
+        HorizontalPager(paginas, Modifier.fillMaxSize(), beyondViewportPageCount = 1, userScrollEnabled = paginas.settledPage != PAGINA_YOUTUBE) { p ->
             if (p == PAGINA_YOUTUBE) {
                 PaginaYoutube(youtube)
             } else {

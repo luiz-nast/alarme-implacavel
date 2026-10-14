@@ -18,6 +18,9 @@ val SUBIDA_ALARME = Subida(0.10f, 0.40f, 30_000)
 /** Remédio: um toque suave, sem a música, de 15% a 75% em 2 min. */
 val SUBIDA_REMEDIO = Subida(0.15f, 0.75f, 120_000)
 
+/** A voz do app (bom dia, avisos, frases, parabéns): um pouco abaixo da música, que vai a 40%. O dono pediu 30%. */
+const val VOLUME_DA_VOZ = 0.30f
+
 /**
  * Um alarme salvo pelo usuário, com as regras de quando ele toca (e, no fim do arquivo, o
  * [EmAndamento], o alarme que tocou e ainda não foi cumprido). Sem dependência do Android (fora a
@@ -122,8 +125,11 @@ data class EmAndamento(val alarme: Alarme, val desde: Long, val musica: String?,
         return (maximo * (s.inicio + (s.fim - s.inicio) * subiu)).roundToInt()
     }
 
-    /** Volume das falas e dos sons de aviso: o do fim da subida (40%), sempre, mesmo que a subida não tenha acabado. */
-    fun volumeDasFalas(maximo: Int): Int = (maximo * subida.fim).roundToInt()
+    /** Volume dos sons de aviso (bipe positivo, plim, parabéns): o do fim da subida (40%), sempre, mesmo que a subida não tenha acabado. */
+    fun volumeDosAvisos(maximo: Int): Int = (maximo * subida.fim).roundToInt()
+
+    /** Volume da voz do app: [VOLUME_DA_VOZ], abaixo dos avisos. */
+    fun volumeDaVoz(maximo: Int): Int = (maximo * VOLUME_DA_VOZ).roundToInt()
 
     private val subida get() = if (alarme.remedio) SUBIDA_REMEDIO else SUBIDA_ALARME
 
