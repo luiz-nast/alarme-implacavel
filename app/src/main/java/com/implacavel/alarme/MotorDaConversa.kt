@@ -1,8 +1,7 @@
 // O "cérebro" da conversa da manhã: recebe o que a pessoa disse e devolve a próxima fala da IA, só texto. A voz,
-// a vez de cada um, o relógio e o fim são do AlarmeService. O motor desta versão ainda não existe: o escolhido
-// é um modelo no próprio celular (Gemma), sem internet. Sem motor, o despertador com conversa e caminhada toca
-// a missão de sempre. O Gemini, pela internet, fica guardado em reserva/gemini (fora do app), pronto pra voltar
-// se o modelo do celular não servir.
+// a vez de cada um, o relógio e o fim são do AlarmeService. O motor é o Gemma no próprio celular ([ModeloLocal]),
+// sem internet. Sem o modelo no celular, o despertador com conversa e caminhada toca a missão de sempre. O Gemini,
+// pela internet, fica guardado em reserva/gemini (fora do app), pronto pra voltar se o modelo do celular não servir.
 package com.implacavel.alarme
 
 import android.content.Context
@@ -26,12 +25,17 @@ interface MotorDaConversa {
     fun desligar()
 
     companion object {
-        /** Dá pra conversar nesta manhã. Ainda não: falta o motor do modelo no celular. */
-        @Suppress("UNUSED_PARAMETER")
-        fun disponivel(ctx: Context): Boolean = false
+        /** Dá pra conversar nesta manhã: o modelo está no celular e cabe na memória ([ModeloLocal.disponivel]). */
+        fun disponivel(ctx: Context): Boolean = ModeloLocal.disponivel(ctx)
 
-        /** Um motor novo, com a [instrucao] do treinador ([instrucaoDoTreinador]) e a [falaNaoNegocia]; null sem motor. */
-        @Suppress("UNUSED_PARAMETER")
-        fun criar(ctx: Context, instrucao: String, falaNaoNegocia: String): MotorDaConversa? = null
+        /** Começa a carregar o modelo em segundo plano, pra ele estar pronto quando a conversa começar. */
+        fun preparar(ctx: Context) = ModeloLocal.preparar(ctx)
+
+        /** Um motor novo, com a [instrucao] do treinador ([instrucaoDoTreinador]) e a [falaNaoNegocia]; null sem modelo. */
+        fun criar(ctx: Context, instrucao: String, falaNaoNegocia: String): MotorDaConversa? =
+            if (disponivel(ctx)) ModeloLocal(ctx, instrucao, falaNaoNegocia) else null
+
+        /** Tira o modelo da memória (fim da conversa ou do alarme). */
+        fun liberar() = ModeloLocal.liberar()
     }
 }

@@ -5,3 +5,8 @@
 # inteiras custa pouco perto dos ~8 MB do modelo nativo.
 -keep class com.google.mlkit.** { *; }
 -keep class com.google.android.gms.internal.mlkit_** { *; }
+
+# A IA do celular (LiteRT-LM): a parte nativa chama de volta classes Kotlin dela pelo nome (JNI) e lê as
+# mensagens por reflexão (Gson). Renomeadas ou cortadas pelo R8, o modelo não carregaria.
+-keep class com.google.ai.edge.litertlm.** { *; }
+-dontwarn com.google.ai.edge.litertlm.**

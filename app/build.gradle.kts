@@ -74,6 +74,9 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.6.2")
     implementation("androidx.camera:camera-view:1.6.2")
     implementation("com.google.mlkit:face-detection:16.1.7")
+    // A IA da conversa da manhã, no próprio celular (Gemma pelo LiteRT-LM, do Google). A 0.16.1 é a última feita
+    // com o Kotlin 2.2, o deste projeto (a 0.17 em diante pede o 2.4)
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.16.1")
     testImplementation("junit:junit:4.13.2")
     // org.json de verdade nos testes (o do android.jar dos testes só lança exceção)
     testImplementation("org.json:json:20260814")

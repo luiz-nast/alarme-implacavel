@@ -121,11 +121,11 @@ class ConversaTest {
         assertTrue(vazia.contains("2:05 PM"))
         assertTrue(vazia.contains("no headlines"))
         assertFalse(vazia.contains("His goals"))
-        // Metas grandes são cortadas; manchetes, no máximo 8
+        // Metas grandes são cortadas; manchetes, no máximo MANCHETES_MAX (o modelo do celular lê tudo antes de falar)
         val grande = instrucaoDoTreinador((1..10).map { "Manchete $it" }, "§".repeat(5_000), LocalTime.of(6, 0))
         assertEquals(METAS_MAX_LETRAS, grande.count { it == '§' })
-        assertTrue(grande.contains("8. Manchete 8"))
-        assertFalse(grande.contains("Manchete 9"))
+        assertTrue(grande.contains("$MANCHETES_MAX. Manchete $MANCHETES_MAX"))
+        assertFalse(grande.contains("Manchete ${MANCHETES_MAX + 1}"))
     }
 
     @Test

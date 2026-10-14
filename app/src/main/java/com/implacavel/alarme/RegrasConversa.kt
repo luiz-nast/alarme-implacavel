@@ -47,11 +47,11 @@ const val PAUSA_NOVA_TENTATIVA_MS = 1_500L
 /** Vezes seguidas sem resposta da IA: a conversa acaba antes e a manhã segue pra próxima etapa. */
 const val FALHAS_DA_IA_ATE_DESISTIR = 3
 
-/** Manchetes do dia que a IA recebe. */
-const val MANCHETES_MAX = 8
+/** Manchetes do dia que a IA recebe: poucas, porque o modelo do celular lê a instrução inteira antes de falar. */
+const val MANCHETES_MAX = 5
 
-/** As metas (do site do dono) vão pra IA até esse tanto de letras. */
-const val METAS_MAX_LETRAS = 2_000
+/** As metas (do site do dono) vão pra IA até esse tanto de letras (pouco, pelo mesmo motivo). */
+const val METAS_MAX_LETRAS = 800
 
 /** A primeira fala "da pessoa" pra IA, inventada pelo app: ela abre a conversa. */
 const val PEDIDO_DE_ABERTURA =

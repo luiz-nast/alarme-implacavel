@@ -99,6 +99,12 @@
                 android:value="Toca o alarme (som, vibração e tela cheia) até o usuário desligar" />
         </service>
 
+        <!-- Teste da IA do celular, sem som: só pelo cabo (o adb tem a permissão DUMP; app comum, não). Veja TesteDaIa.kt -->
+        <receiver
+            android:name=".TesteDaIa"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
+
         <receiver
             android:name=".AlarmeReceiver"
             android:directBootAware="true"

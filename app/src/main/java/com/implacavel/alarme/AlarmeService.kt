@@ -324,6 +324,7 @@ class AlarmeService : Service() {
     private var caminho: CaminhoDaManha? = null // decidido depois do primeiro bom dia
     private var etapa: EtapaDaManha? = null
     private var motor: MotorDaConversa? = null // a IA da conversa, com o histórico
+    private var iaBloqueada = false // o app já caiu neste alarme: a IA do celular (que pesa) fica de fora
     private var abertura: String? = null // a primeira fala da IA (null = não veio)
     private var aberturaChegou = false
     private var chuva: Boolean? = null // null = não deu pra saber (sem internet, sem localização): sem caminhada
@@ -484,6 +485,7 @@ class AlarmeService : Service() {
         voz?.desligar()
         rodadaConversa++ // notícias, clima e IA atrasados não chegam em ninguém
         motor?.desligar()
+        MotorDaConversa.liberar()
         _silenciado.value = false
         _saudando.value = false
         _comemorando.value = false
@@ -530,6 +532,10 @@ class AlarmeService : Service() {
             return
         }
         Log.i(TAG, "Serviço: tocando \"${alarme.nome}\" (missão=${alarme.missao}, remédio=${alarme.remedio}, caminhada=${alarme.caminhada}, quedas=$quedas)")
+        // O modelo começa a carregar já, com a música, pra estar pronto no fim do bom dia. Se o app já saiu sozinho
+        // neste alarme (queda, travamento ou falta de memória), pode ter sido ele: a manhã fica sendo a de sempre
+        iaBloqueada = saiuSozinhoDesde(em.desde)
+        if (comConversaECaminhada(alarme) && !iaBloqueada && MotorDaConversa.disponivel(this)) MotorDaConversa.preparar(this)
         telaAberta = true
         _silenciado.value = false
         _saudando.value = false
@@ -539,6 +545,18 @@ class AlarmeService : Service() {
         _caminhada.value = null
         sirene.tocar()
         handler.post(renovar)
+    }
+
+    /**
+     * O app saiu sozinho desde [desde]: as quedas de [quedasDesde] ou o Android matando por falta de memória (o
+     * modelo da IA usa uns 1,5 GB). Do Android 11 em diante.
+     */
+    private fun saiuSozinhoDesde(desde: Long): Boolean {
+        if (Build.VERSION.SDK_INT < 30) return false
+        val motivos = setOf(ApplicationExitInfo.REASON_CRASH, ApplicationExitInfo.REASON_CRASH_NATIVE, ApplicationExitInfo.REASON_ANR, ApplicationExitInfo.REASON_LOW_MEMORY)
+        return getSystemService(ActivityManager::class.java)
+            .getHistoricalProcessExitReasons(packageName, 0, 0)
+            .any { it.timestamp > desde && it.reason in motivos }
     }
 
     /** Quedas do app (erro, erro nativo ou travamento) desde [desde]. O Android só conta isso do 11 em diante. */
@@ -766,8 +784,9 @@ class AlarmeService : Service() {
     private fun prepararManha() {
         saudacaoTerminou = false
         if (caminho != null) return
-        if (!MotorDaConversa.disponivel(this)) {
-            Log.i(TAG, "Conversa: sem a IA no celular, a missão de sempre")
+        if (iaBloqueada || !MotorDaConversa.disponivel(this)) {
+            Log.i(TAG, "Conversa: ${if (iaBloqueada) "o app já caiu neste alarme" else "sem a IA no celular"}, a missão de sempre")
+            MotorDaConversa.liberar()
             caminho = CaminhoDaManha.ANTIGO
             return
         }
@@ -847,6 +866,7 @@ class AlarmeService : Service() {
         if (escolhido == CaminhoDaManha.ANTIGO || primeira == null) {
             motor?.desligar()
             motor = null
+            MotorDaConversa.liberar()
             // Igual ao alarme de sempre, com o mesmo prazo se a voz travar
             handler.removeCallbacks(comecarAtividade)
             handler.postDelayed(comecarAtividade, SAUDACAO_MAX_MS)
@@ -1061,6 +1081,7 @@ class AlarmeService : Service() {
         handler.removeCallbacks(tiqueDaConversa)
         motor?.desligar()
         motor = null
+        MotorDaConversa.liberar() // antes da caminhada ou da câmera: menos memória e menos calor
         iaFalando = false
         val caminhar = caminho == CaminhoDaManha.CONVERSA_E_CAMINHADA
         etapa = if (caminhar) EtapaDaManha.CAMINHADA else EtapaDaManha.CAMERA
@@ -1165,6 +1186,7 @@ class AlarmeService : Service() {
         rodadaConversa++
         motor?.desligar()
         motor = null
+        MotorDaConversa.liberar()
         caminho = null
         etapa = null
         conversadoMs = 0
@@ -1201,6 +1223,7 @@ class AlarmeService : Service() {
         rodadaConversa++ // nem a IA nem uma voz atrasada da conversa falam mais
         motor?.desligar()
         motor = null
+        MotorDaConversa.liberar()
         // Cumprido já fica gravado: se o app cair na comemoração, o alarme não volta
         volumeAoFim = Ajustes.emAndamento?.volume
         Ajustes.volumeParaDevolver = volumeAoFim
