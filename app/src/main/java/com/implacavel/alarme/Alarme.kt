@@ -31,6 +31,9 @@ const val VOLUME_DA_VOZ = 0.30f
  * @property missao só desliga dizendo STOP e olhando pra câmera de olhos abertos (veja Missao.kt).
  * @property remedio lembrete de remédio: toca um toque suave do app em vez da música, subindo como
  *   [SUBIDA_REMEDIO].
+ * @property caminhada despertador com conversa e caminhada: depois do STOP, 5 min de conversa com a
+ *   IA do celular e 18 min andando na rua (com chuva, ou sem internet pra saber, câmera; sem a IA, a missão de
+ *   40 min). Só vale com [missao].
  */
 data class Alarme(
     val id: Int,
@@ -41,14 +44,21 @@ data class Alarme(
     val ativo: Boolean = true,
     val missao: Boolean = true,
     val remedio: Boolean = false,
+    val caminhada: Boolean = false,
 ) {
     val horario: String get() = hhmm(hora, minuto)
 
     /** Nome pra mostrar: o rótulo, ou "Alarme" se ele estiver em branco. */
     val nome: String get() = rotulo.ifBlank { "Alarme" }
 
-    /** O alarme do botão "Testar agora" ([ID_TESTE]): toca mais baixo e pede menos da câmera. */
-    val deTeste: Boolean get() = id == ID_TESTE
+    /** Um dos alarmes dos botões de teste ([ID_TESTE] e [ID_TESTE_CAMINHADA]): cada etapa pede bem menos tempo (veja [metaOlhar]). */
+    val deTeste: Boolean get() = id == ID_TESTE || id == ID_TESTE_CAMINHADA
+
+    /**
+     * Um tipo só por alarme: com missão é despertador (com atividade, ou com conversa e caminhada), sem
+     * missão é lembrete de remédio. Versões antigas deixavam missão e remédio juntos, ou nenhum dos dois.
+     */
+    fun normalizado(): Alarme = copy(remedio = !missao, caminhada = caminhada && missao)
 
     /** Próximo horário que bate com hora, minuto e dias, estritamente depois de [agora]. */
     fun proximoDisparo(agora: ZonedDateTime): ZonedDateTime {
@@ -69,12 +79,22 @@ data class Alarme(
         .put("ativo", ativo)
         .put("missao", missao)
         .put("remedio", remedio)
+        .put("caminhada", caminhada)
 
     companion object {
         /** Id reservado pro botão "Testar agora". Os alarmes salvos começam em 1. */
         const val ID_TESTE = 0
 
-        fun teste() = Alarme(id = ID_TESTE, hora = 0, minuto = 0, rotulo = "Teste do Alarme Implacável")
+        /** Id reservado pro botão "Testar conversa e caminhada". */
+        const val ID_TESTE_CAMINHADA = -1
+
+        /** O alarme de um botão de teste: o de sempre, ou com [caminhada] (conversa com a IA e caminhada). */
+        fun teste(caminhada: Boolean = false) =
+            if (caminhada) {
+                Alarme(id = ID_TESTE_CAMINHADA, hora = 0, minuto = 0, rotulo = "Teste da conversa e caminhada", caminhada = true)
+            } else {
+                Alarme(id = ID_TESTE, hora = 0, minuto = 0, rotulo = "Teste do Alarme Implacável")
+            }
 
         fun deJson(o: JSONObject): Alarme {
             val dias = o.optJSONArray("dias")
@@ -87,6 +107,7 @@ data class Alarme(
                 ativo = o.optBoolean("ativo", true),
                 missao = o.optBoolean("missao", true),
                 remedio = o.optBoolean("remedio", false),
+                caminhada = o.optBoolean("caminhada", false),
                 // "volumeForte" (e "volumeMaximo"), das versões anteriores, não existe mais: ignorado
             )
         }
@@ -104,12 +125,19 @@ data class EmAndamento(val alarme: Alarme, val desde: Long, val musica: String?,
      * Outro alarme disparou no meio, [agora] (epoch em ms). Teste no meio de um alarme não muda nada.
      * Alarme de verdade no meio do teste toma o lugar dele, com as regras dele (a câmera do teste pede
      * bem menos, veja [metaOlhar]), tocando desde agora e com o volume de antes do teste. Dois alarmes
-     * de verdade viram um: este continua, com a exigência maior dos dois (e com a música, se um deles tiver).
+     * de verdade viram um: este continua, com a exigência maior dos dois (e com a música, se um deles tiver;
+     * e com a conversa e caminhada, se um deles tiver).
      */
     fun juntar(outro: Alarme, agora: Long): EmAndamento = when {
         outro.deTeste -> this
         alarme.deTeste -> copy(alarme = outro, desde = agora)
-        else -> copy(alarme = alarme.copy(missao = alarme.missao || outro.missao, remedio = alarme.remedio && outro.remedio))
+        else -> copy(
+            alarme = alarme.copy(
+                missao = alarme.missao || outro.missao,
+                remedio = alarme.remedio && outro.remedio,
+                caminhada = alarme.caminhada || outro.caminhada,
+            ),
+        )
     }
 
     /**

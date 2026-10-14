@@ -16,8 +16,9 @@ import androidx.core.net.toUri
 
 /**
  * Cada permissão que o alarme precisa, com a checagem ([liberado]) e o jeito de liberar.
- * [permissao] é a permissão pedida com o diálogo do sistema, quando existe; as demais, e as já
- * negadas no diálogo, são liberadas numa tela das Configurações ([abrirConfiguracao]).
+ * [permissao] é a permissão pedida com o diálogo do sistema, quando existe (o pedido vai com [pedido]); as
+ * demais, e as já negadas no diálogo, são liberadas numa tela das Configurações ([abrirConfiguracao]).
+ * A tela principal só mostra os de [poderesNecessarios].
  */
 enum class Poder(val titulo: String, val explicacao: String, val permissao: String? = null) {
     NOTIFICACOES(
@@ -27,6 +28,7 @@ enum class Poder(val titulo: String, val explicacao: String, val permissao: Stri
     ),
     MICROFONE("Microfone", "Pra ouvir você dizer STOP.", Manifest.permission.RECORD_AUDIO),
     CAMERA("Câmera", "Pra conferir que você está de olhos abertos.", Manifest.permission.CAMERA),
+    LOCALIZACAO("Localização", "Pra conferir a caminhada da manhã.", Manifest.permission.ACCESS_FINE_LOCATION),
     ALARME_EXATO("Alarme no minuto exato", "Toca na hora certa mesmo com o celular dormindo."),
     TELA_CHEIA("Tela cheia", "Deixa o alarme tomar a tela, mesmo bloqueada."),
     CANAL("Alerta em destaque", "O canal \"Alarme tocando\" precisa estar com importância alta."),
@@ -34,7 +36,7 @@ enum class Poder(val titulo: String, val explicacao: String, val permissao: Stri
 
     fun liberado(ctx: Context): Boolean = when (this) {
         NOTIFICACOES -> NotificationManagerCompat.from(ctx).areNotificationsEnabled()
-        MICROFONE, CAMERA -> permissaoFaltando(ctx) == null
+        MICROFONE, CAMERA, LOCALIZACAO -> permissaoFaltando(ctx) == null
         ALARME_EXATO ->
             Build.VERSION.SDK_INT < 31 || ctx.getSystemService(AlarmManager::class.java).canScheduleExactAlarms()
         TELA_CHEIA ->
@@ -51,6 +53,16 @@ enum class Poder(val titulo: String, val explicacao: String, val permissao: Stri
         permissao?.takeUnless { ContextCompat.checkSelfPermission(ctx, it) == PackageManager.PERMISSION_GRANTED }
 
     /**
+     * O que vai no diálogo do sistema pra liberar [permissao]. A localização precisa (FINE) vai junto com a
+     * aproximada (COARSE): no Android 12+, pedida sozinha, o sistema ignora o pedido.
+     */
+    val pedido: Array<String>
+        get() = when (this) {
+            LOCALIZACAO -> arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+            else -> listOfNotNull(permissao).toTypedArray()
+        }
+
+    /**
      * Abre a tela das Configurações onde este poder é liberado; se o celular não tiver essa tela, a do
      * app. Numa tarefa separada: assim a tela do alarme, ao voltar, não fecha as Configurações junto.
      */
@@ -64,7 +76,7 @@ enum class Poder(val titulo: String, val explicacao: String, val permissao: Stri
     private fun telaParaLiberar(ctx: Context): Intent = when (this) {
         NOTIFICACOES -> Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
             .putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName)
-        MICROFONE, CAMERA -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pacote(ctx))
+        MICROFONE, CAMERA, LOCALIZACAO -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pacote(ctx))
         ALARME_EXATO -> Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, pacote(ctx))
         TELA_CHEIA -> Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, pacote(ctx))
         CANAL -> Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
@@ -75,3 +87,10 @@ enum class Poder(val titulo: String, val explicacao: String, val permissao: Stri
 
     private fun pacote(ctx: Context) = "package:${ctx.packageName}".toUri()
 }
+
+/**
+ * Os poderes que a tela principal confere e pede com estes [alarmes]: todos, menos a localização, que só
+ * entra se algum alarme salvo tem caminhada (quem não usa a caminhada não é incomodado).
+ */
+fun poderesNecessarios(alarmes: List<Alarme>): List<Poder> =
+    Poder.entries.filter { it != Poder.LOCALIZACAO || alarmes.any { alarme -> alarme.caminhada } }

@@ -10,7 +10,7 @@ import java.time.ZonedDateTime
 /**
  * Agenda e cancela disparos no AlarmManager do Android, que roda fora do app: um disparo acontece
  * mesmo com o app fechado, caído ou travado. São dois tipos de broadcast pro [AlarmeReceiver]:
- * - DISPARAR: a próxima ocorrência de cada alarme (e o botão de teste), um por id;
+ * - DISPARAR: a próxima ocorrência de cada alarme (e os dois botões de teste), um por id;
  * - RETOMAR: a rede de segurança do alarme em andamento ([Ajustes.emAndamento]). Enquanto ele
  *   toca, o [AlarmeService] empurra a retomada pra frente a cada poucos segundos; se o app
  *   morrer, ela dispara e o alarme volta sozinho. Só é cancelada quando a missão é cumprida.
@@ -40,9 +40,11 @@ object Agendador {
         return quando
     }
 
-    /** Botão "Testar agora": toca o alarme de teste daqui a [segundos]. */
-    fun agendarTeste(ctx: Context, segundos: Int) =
-        agendarEm(ctx, System.currentTimeMillis() + segundos * 1_000L, disparo(ctx, Alarme.ID_TESTE))
+    /** Botões de teste: toca o alarme de teste ([Alarme.teste], com ou sem [caminhada]) daqui a [segundos]. */
+    fun agendarTeste(ctx: Context, segundos: Int, caminhada: Boolean = false) {
+        val id = if (caminhada) Alarme.ID_TESTE_CAMINHADA else Alarme.ID_TESTE
+        agendarEm(ctx, System.currentTimeMillis() + segundos * 1_000L, disparo(ctx, id))
+    }
 
     fun cancelar(ctx: Context, id: Int) = alarmManager(ctx).cancel(disparo(ctx, id))
 
@@ -80,7 +82,10 @@ object Agendador {
         }
     }
 
-    /** Código id * 2, o mesmo das versões anteriores: atualizar o app substitui os agendamentos antigos em vez de duplicar. */
+    /**
+     * Código id * 2, o mesmo das versões anteriores: atualizar o app substitui os agendamentos antigos em vez de duplicar.
+     * O teste da caminhada (id -1) fica com -2, sem bater com nenhum outro.
+     */
     private fun disparo(ctx: Context, id: Int): PendingIntent {
         val intent = Intent(ctx, AlarmeReceiver::class.java).setAction(ACAO_DISPARAR).putExtra(EXTRA_ID, id)
         return PendingIntent.getBroadcast(ctx, id * 2, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)

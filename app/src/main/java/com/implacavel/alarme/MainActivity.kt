@@ -38,7 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.ZonedDateTime
 
-/** Tela principal: permissões, música, botão de teste e lista de alarmes. */
+/** Tela principal: permissões, música, botões de teste e lista de alarmes. */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -61,22 +61,23 @@ private fun TelaPrincipal() {
     val agora = agoraACada(15_000) // pros textos "toca em 9 h 12 min"
     var editando by remember { mutableStateOf<Alarme?>(null) }
 
-    // Permissões: relidas toda vez que a tela volta (do diálogo do sistema ou das Configurações)
-    val poderes = lidoAoVoltar { Poder.entries.associateWith { it.liberado(ctx) } }
+    // Permissões: relidas toda vez que a tela volta (do diálogo do sistema ou das Configurações) e quando
+    // um alarme com caminhada aparece ou some (só aí a localização entra na lista)
+    val usaCaminhada = alarmes.any { it.caminhada }
+    val poderes = lidoAoVoltar(usaCaminhada) { poderesNecessarios(alarmes).associateWith { it.liberado(ctx) } }
 
-    // Permissões com diálogo do sistema (notificação, microfone, câmera). Se o usuário já negou, o
-    // sistema não pergunta de novo; aí, se o pedido veio de um botão "Liberar", abre as Configurações.
+    // Permissões com diálogo do sistema (notificação, microfone, câmera, localização). Se o usuário já
+    // negou, o sistema não pergunta de novo; aí, se o pedido veio de um botão "Liberar", abre as Configurações.
     var pedidoDoBotao by remember { mutableStateOf<Poder?>(null) }
-    val pedirPermissao = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
-        pedidoDoBotao?.let { if (!ok) it.abrirConfiguracao(ctx) }
+    val pedirPermissao = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { _ ->
+        pedidoDoBotao?.let { if (it.permissaoFaltando(ctx) != null) it.abrirConfiguracao(ctx) }
         pedidoDoBotao = null
     }
-    LaunchedEffect(Unit) { Poder.NOTIFICACOES.permissaoFaltando(ctx)?.let { pedirPermissao.launch(it) } }
+    LaunchedEffect(Unit) { Poder.NOTIFICACOES.permissaoFaltando(ctx)?.let { pedirPermissao.launch(Poder.NOTIFICACOES.pedido) } }
     val liberar: (Poder) -> Unit = { poder ->
-        val faltando = poder.permissaoFaltando(ctx)
-        if (faltando != null) {
+        if (poder.permissaoFaltando(ctx) != null) {
             pedidoDoBotao = poder
-            pedirPermissao.launch(faltando)
+            pedirPermissao.launch(poder.pedido)
         } else {
             poder.abrirConfiguracao(ctx)
         }
@@ -130,6 +131,25 @@ private fun TelaPrincipal() {
                     },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Testar agora (toca em 10 s)") }
+            }
+            item {
+                OutlinedButton(
+                    onClick = {
+                        // Sem a localização, a caminhada vira câmera: pede no diálogo agora (sem abrir as Configurações;
+                        // ela só é conferida depois do STOP e do bom dia)
+                        val comIa = MotorDaConversa.disponivel(ctx)
+                        val semLocalizacao = Poder.LOCALIZACAO.permissaoFaltando(ctx) != null
+                        if (semLocalizacao && comIa) pedirPermissao.launch(Poder.LOCALIZACAO.pedido)
+                        Agendador.agendarTeste(ctx, 10, caminhada = true)
+                        val aviso = when {
+                            !comIa -> "A IA do celular ainda não está no app: vai ser a missão de sempre."
+                            semLocalizacao -> "Libere a localização no aviso, senão a caminhada vira câmera."
+                            else -> "Bloqueie a tela pra ver o efeito completo."
+                        }
+                        Toast.makeText(ctx, "Toca em 10 segundos. $aviso", Toast.LENGTH_LONG).show()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Testar conversa e caminhada (toca em 10 s)") }
             }
             items(alarmes, key = { it.id }) { alarme ->
                 CartaoAlarme(

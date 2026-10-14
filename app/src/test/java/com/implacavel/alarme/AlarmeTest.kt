@@ -8,7 +8,7 @@ import org.junit.Test
 import java.time.ZoneId
 import java.time.ZonedDateTime
 
-/** Regras de quando o alarme toca ([Alarme.proximoDisparo]), nome, JSON e o alarme em andamento ([EmAndamento]). */
+/** Regras de quando o alarme toca ([Alarme.proximoDisparo]), nome, JSON, tipo, testes e o alarme em andamento ([EmAndamento]). */
 class AlarmeTest {
     private val zona = ZoneId.of("America/Sao_Paulo")
 
@@ -54,6 +54,38 @@ class AlarmeTest {
         val alarme = Alarme(3, 6, 45, rotulo = "Academia", dias = setOf(1, 3, 5), ativo = false, missao = false, remedio = true)
         assertEquals(alarme, Alarme.deJson(alarme.paraJson()))
         assertEquals(Alarme.teste(), Alarme.deJson(Alarme.teste().paraJson()))
+        val caminhada = Alarme(4, 6, 0, rotulo = "Caminhada", dias = setOf(1, 2, 3, 4, 5), caminhada = true)
+        assertEquals(caminhada, Alarme.deJson(caminhada.paraJson()))
+        assertTrue(caminhada.paraJson().getBoolean("caminhada"))
+        assertEquals(Alarme.teste(caminhada = true), Alarme.deJson(Alarme.teste(caminhada = true).paraJson()))
+    }
+
+    @Test
+    fun doisBotoesDeTeste() {
+        val comum = Alarme.teste()
+        val caminhada = Alarme.teste(caminhada = true)
+        assertTrue(comum.deTeste)
+        assertTrue(caminhada.deTeste)
+        assertFalse(comum.caminhada)
+        assertTrue(caminhada.caminhada && caminhada.missao)
+        // Ids diferentes e nunca o de um alarme salvo (esses começam em 1)
+        assertEquals(-1, Alarme.ID_TESTE_CAMINHADA)
+        assertTrue(Alarme.ID_TESTE_CAMINHADA != Alarme.ID_TESTE && Alarme.ID_TESTE_CAMINHADA < 1)
+        assertFalse(Alarme(1, 7, 0).deTeste)
+        assertFalse(Alarme(1, 7, 0, caminhada = true).deTeste)
+        // Sem internet, a missão de sempre, com a câmera curta do teste
+        assertEquals(META_OLHAR_TESTE_MS, metaOlhar(caminhada))
+    }
+
+    @Test
+    fun umTipoSoPorAlarme() {
+        // Versões antigas: missão e remédio juntos viram despertador; nenhum dos dois, lembrete
+        assertEquals(Alarme(1, 7, 0, missao = true, remedio = false), Alarme(1, 7, 0, missao = true, remedio = true).normalizado())
+        assertEquals(Alarme(1, 7, 0, missao = false, remedio = true), Alarme(1, 7, 0, missao = false, remedio = false).normalizado())
+        // A conversa e caminhada só vale com missão
+        assertEquals(Alarme(1, 7, 0, missao = false, remedio = true), Alarme(1, 7, 0, missao = false, caminhada = true).normalizado())
+        assertEquals(Alarme(1, 7, 0, caminhada = true), Alarme(1, 7, 0, caminhada = true).normalizado())
+        assertEquals(Alarme(1, 7, 0), Alarme(1, 7, 0).normalizado())
     }
 
     @Test
@@ -62,6 +94,8 @@ class AlarmeTest {
         assertEquals(em, EmAndamento.deJson(em.paraJson()))
         val semMusica = em.copy(musica = null)
         assertEquals(semMusica, EmAndamento.deJson(semMusica.paraJson()))
+        val caminhada = em.copy(alarme = Alarme(4, 6, 0, caminhada = true))
+        assertEquals(caminhada, EmAndamento.deJson(caminhada.paraJson()))
     }
 
     @Test
@@ -89,6 +123,27 @@ class AlarmeTest {
         // O contrário: o teste no meio do alarme de verdade não muda nada
         val deVerdade = EmAndamento(Alarme(5, 7, 0, missao = false), desde = 0, musica = null, volume = 3)
         assertEquals(deVerdade, deVerdade.juntar(Alarme.teste(), agora = 99))
+    }
+
+    @Test
+    fun conversaECaminhadaAoJuntar() {
+        // Dois alarmes de verdade: se um tem conversa e caminhada, o junto tem
+        val comum = EmAndamento(Alarme(1, 6, 0), desde = 0, musica = null, volume = 5)
+        val junto = comum.juntar(Alarme(2, 6, 0, caminhada = true), agora = 10)
+        assertEquals(EmAndamento(Alarme(1, 6, 0, caminhada = true), desde = 0, musica = null, volume = 5), junto)
+        // E não perde por juntar com um alarme comum ou com um lembrete sem missão
+        val caminhada = EmAndamento(Alarme(2, 6, 0, caminhada = true), desde = 0, musica = null, volume = 5)
+        assertEquals(caminhada, caminhada.juntar(Alarme(3, 6, 5), agora = 10))
+        assertEquals(caminhada, caminhada.juntar(Alarme(4, 6, 5, missao = false, remedio = true), agora = 10))
+        // O teste da caminhada no meio de um alarme de verdade não muda nada
+        assertEquals(comum, comum.juntar(Alarme.teste(caminhada = true), agora = 10))
+        // Alarme de verdade no meio do teste da caminhada toma o lugar dele, com as regras dele
+        val teste = EmAndamento(Alarme.teste(caminhada = true), desde = 0, musica = null, volume = 3)
+        assertEquals(EmAndamento(Alarme(5, 7, 0), desde = 99, musica = null, volume = 3), teste.juntar(Alarme(5, 7, 0), agora = 99))
+        // Um teste no meio do outro: segue o primeiro
+        assertEquals(teste, teste.juntar(Alarme.teste(), agora = 99))
+        val testeComum = EmAndamento(Alarme.teste(), desde = 0, musica = null, volume = 3)
+        assertEquals(testeComum, testeComum.juntar(Alarme.teste(caminhada = true), agora = 99))
     }
 
     @Test
@@ -127,5 +182,6 @@ class AlarmeTest {
             """{"id":2,"hora":7,"minuto":0,"rotulo":"","dias":[],"ativo":true,"missao":true,"volumeMaximo":true,"sonecaAte":1790000000000}""",
         )
         assertEquals(Alarme(2, 7, 0), Alarme.deJson(antigo))
+        assertFalse(Alarme.deJson(antigo).caminhada) // antes da conversa e caminhada: o despertador de sempre
     }
 }

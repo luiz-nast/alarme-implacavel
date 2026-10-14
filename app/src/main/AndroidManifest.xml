@@ -19,8 +19,13 @@
     <!-- Missão pra desligar: ouvir "stop" e ver os olhos abertos pela câmera frontal -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.CAMERA" />
-    <!-- O YouTube ao lado da câmera, na etapa da câmera (PaginaYoutube.kt) -->
+    <!-- O YouTube ao lado da câmera, na etapa da câmera (PaginaYoutube.kt), e no despertador com
+         conversa e caminhada: as notícias, a chuva e as metas (a IA roda no celular) -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Caminhada da manhã pelo GPS e a chuva do lugar. Só pedida se algum alarme tem caminhada (Poder.LOCALIZACAO);
+         no Android 12+, a precisa (FINE) tem que ser pedida junto com a aproximada (COARSE) -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <!-- Sem câmera ou microfone o app ainda instala; a missão cai pra um botão -->
     <uses-feature
@@ -31,6 +36,10 @@
         android:required="false" />
     <uses-feature
         android:name="android.hardware.microphone"
+        android:required="false" />
+    <!-- Sem GPS o app também instala; a caminhada cai pra câmera -->
+    <uses-feature
+        android:name="android.hardware.location.gps"
         android:required="false" />
 
     <!-- Android 11+: sem isso o app não enxerga o serviço de reconhecimento de voz do sistema -->

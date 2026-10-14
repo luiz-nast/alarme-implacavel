@@ -52,8 +52,8 @@ fun EditorAlarme(
     val relogio = rememberTimePickerState(initialHour = inicial.hora, initialMinute = inicial.minuto, is24Hour = true)
     var rotulo by remember { mutableStateOf(inicial.rotulo) }
     var dias by remember { mutableStateOf(inicial.dias) }
-    // Ou é despertador com atividade (missão), ou lembrete de remédio: nunca os dois
-    var lembrete by remember { mutableStateOf(inicial.remedio) }
+    // Um tipo só: despertador com atividade, despertador com conversa e caminhada (os dois com missão) ou lembrete de remédio
+    var tipo by remember { mutableStateOf(tipoDe(inicial)) }
 
     Dialog(onDismissRequest = onCancelar, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
@@ -87,8 +87,21 @@ fun EditorAlarme(
                 )
                 Spacer(Modifier.height(8.dp))
                 Text("Tipo", style = MaterialTheme.typography.labelLarge, modifier = Modifier.fillMaxWidth())
-                OpcaoTipo("Despertador com atividade", "A música, dizer STOP e 40 min de câmera de olhos abertos", !lembrete) { lembrete = false }
-                OpcaoTipo("Lembrete de remédio", "Toque suave, de 15% a 75% do volume em 2 min, e um botão DESLIGAR", lembrete) { lembrete = true }
+                OpcaoTipo(
+                    "Despertador com atividade",
+                    "A música, dizer STOP e 40 min de câmera de olhos abertos",
+                    tipo == TipoDeAlarme.ATIVIDADE,
+                ) { tipo = TipoDeAlarme.ATIVIDADE }
+                OpcaoTipo(
+                    "Despertador com conversa e caminhada",
+                    "STOP, 5 min de conversa com a IA, 7 min pra sair e 18 min andando na rua. Com chuva ou sem internet, câmera no lugar da caminhada",
+                    tipo == TipoDeAlarme.CONVERSA_E_CAMINHADA,
+                ) { tipo = TipoDeAlarme.CONVERSA_E_CAMINHADA }
+                OpcaoTipo(
+                    "Lembrete de remédio",
+                    "Toque suave, de 15% a 75% do volume em 2 min, e um botão DESLIGAR",
+                    tipo == TipoDeAlarme.REMEDIO,
+                ) { tipo = TipoDeAlarme.REMEDIO }
                 Spacer(Modifier.height(12.dp))
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     if (!novo) {
@@ -106,8 +119,9 @@ fun EditorAlarme(
                                 minuto = relogio.minute,
                                 rotulo = rotulo.trim(),
                                 dias = dias,
-                                missao = !lembrete,
-                                remedio = lembrete,
+                                missao = tipo != TipoDeAlarme.REMEDIO,
+                                remedio = tipo == TipoDeAlarme.REMEDIO,
+                                caminhada = tipo == TipoDeAlarme.CONVERSA_E_CAMINHADA,
                                 ativo = true,
                             )
                             onSalvar(alarme)
@@ -117,6 +131,15 @@ fun EditorAlarme(
             }
         }
     }
+}
+
+/** Os tipos de alarme do editor, um só por alarme. */
+private enum class TipoDeAlarme { ATIVIDADE, CONVERSA_E_CAMINHADA, REMEDIO }
+
+private fun tipoDe(alarme: Alarme): TipoDeAlarme = when {
+    alarme.remedio -> TipoDeAlarme.REMEDIO
+    alarme.caminhada -> TipoDeAlarme.CONVERSA_E_CAMINHADA
+    else -> TipoDeAlarme.ATIVIDADE
 }
 
 /** Sete bolinhas (D S T Q Q S S) que ligam e desligam cada dia da semana. */

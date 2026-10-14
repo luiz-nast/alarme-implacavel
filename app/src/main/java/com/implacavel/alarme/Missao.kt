@@ -1,8 +1,9 @@
 // Telas da missão pra desligar o alarme, mostradas pela AlarmeActivity: 1) FALAR: dizer "stop" (a
 // música para); entre as duas, a SAUDAÇÃO falada (Saudacao.kt); 2) OLHAR: olhar pra câmera de olhos abertos até fechar o anel, com o YouTube ao lado
 // (PaginaYoutube.kt) e a câmera numa bolinha por cima dele. Logo depois de o celular
-// reiniciar, antes do primeiro desbloqueio, vem antes a etapa DESBLOQUEAR. Os tempos e as regras ficam
-// em RegrasMissao.kt; a vigia (bipes, zerar o anel, música de volta), no AlarmeService.
+// reiniciar, antes do primeiro desbloqueio, vem antes a etapa DESBLOQUEAR. No despertador com conversa e
+// caminhada, depois da saudação vem a CONVERSA com a IA (e a caminhada, em Caminhada.kt). Os tempos e as regras
+// ficam em RegrasMissao.kt e RegrasConversa.kt; a vigia (bipes, zerar o anel, música de volta), no AlarmeService.
 package com.implacavel.alarme
 
 import android.Manifest
@@ -115,6 +116,9 @@ private val MARGEM_BOLHA = 16.dp
 private val BOLHA_ACIMA_DO_FUNDO = 72.dp
 private val LEGENDA = 160.dp
 private val LEGENDA_ACIMA = 34.dp
+
+/** O anel do tempo de conversa, na etapa da conversa com a IA: menor que o da câmera, pra caber a fala da IA. */
+private val ANEL_CONVERSA = 190.dp
 
 /**
  * Etapa 0, só logo depois de o celular reiniciar: antes do primeiro desbloqueio o reconhecimento de
@@ -270,15 +274,101 @@ fun EtapaVerificacao(passo: Verificacao) {
 
 /**
  * Entre o STOP e a câmera, enquanto a voz do celular dá bom dia ([AlarmeService.saudando]): a câmera
- * começa uns segundos depois que ela termina. [hora] escolhe entre bom dia, boa tarde e boa noite.
+ * começa uns segundos depois que ela termina. [hora] escolhe entre bom dia, boa tarde e boa noite. No
+ * despertador [comConversa] e caminhada, a tela fica aqui até a IA responder (uns segundos depois do bom dia).
  */
 @Composable
-fun EtapaSaudacao(hora: Int) {
+fun EtapaSaudacao(hora: Int, comConversa: Boolean = false) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text("${saudacao(hora)}!", color = VinhoAlarme, fontSize = 34.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
         Text("It's time for the activity check", color = VinhoAlarme, fontSize = 20.sp, textAlign = TextAlign.Center)
         Spacer(Modifier.height(16.dp))
-        Text("A câmera já vai começar", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 16.sp)
+        Text(if (comConversa) "Preparando a manhã…" else "A câmera já vai começar", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 16.sp)
+    }
+}
+
+/**
+ * Conversa da manhã com a IA ([AlarmeService.conversa]): mostra a fala da IA e, na vez da pessoa, escuta em
+ * inglês e mostra o que ouve ("Ouvi: …"). Qualquer fala ouvida avisa o serviço ([AlarmeService.ouviu]) e cada
+ * frase terminada vai pra ele ([AlarmeService.respondeu]); a vez de cada um, o relógio da conversa e os bipes do
+ * silêncio são de lá. O anel enche com o tempo de conversa ("3:12 de 5:00"); em silêncio na sua vez, a contagem
+ * pro bipe (a partir de [AlarmeService.ultimaFala]). Sem reconhecimento de voz, o serviço encerra a conversa.
+ */
+@Composable
+fun EtapaConversa(conversa: Conversa) {
+    val ctx = LocalContext.current
+    // O que a pessoa disse nesta vez: fica na tela enquanto a IA pensa, e some quando chega a vez seguinte
+    var ouvido by remember(conversa.vez) { mutableStateOf("") }
+    if (conversa.suaVez) {
+        DisposableEffect(conversa.vez) {
+            val ouvinte = Ouvinte(
+                ctx, "resposta", aceita = { false },
+                onOuviu = {
+                    ouvido = it
+                    AlarmeService.ouviu(ctx)
+                },
+                onAceito = {},
+                onIndisponivel = { AlarmeService.semVozNaConversa(ctx) },
+                idioma = "en-US",
+                onFraseFinal = { AlarmeService.respondeu(ctx, it) },
+                registrarFala = false, // a conversa não vai pro log (privacidade)
+            )
+            ouvinte.comecar()
+            onDispose { ouvinte.parar() }
+        }
+    }
+    val ultimaFala by AlarmeService.ultimaFala.collectAsStateWithLifecycle()
+    var agora by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(250)
+            agora = SystemClock.elapsedRealtime()
+        }
+    }
+    val calado = agora - ultimaFala
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(Modifier.size(ANEL_CONVERSA), contentAlignment = Alignment.Center) {
+            AnelProgresso((conversa.conversadoMs.toFloat() / conversa.metaMs.coerceAtLeast(1)).coerceIn(0f, 1f), VerdeVez, Modifier.fillMaxSize())
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(tempoAndado(conversa.conversadoMs), color = VinhoAlarme, fontSize = 44.sp, fontWeight = FontWeight.Black)
+                Text("de ${tempoAndado(conversa.metaMs)} de conversa", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 15.sp)
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+        Text(
+            conversa.falaDaIa.ifEmpty { "…" },
+            color = VinhoAlarme,
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(8.dp))
+        // Duas linhas sempre, pra tela não pular: o que o reconhecedor está ouvindo (as últimas palavras)
+        Text(
+            if (ouvido.isNotBlank()) "Ouvi: \"${ouvido.split(" ").takeLast(12).joinToString(" ")}\"" else "",
+            color = VinhoAlarme.copy(alpha = 0.7f),
+            fontSize = 16.sp,
+            textAlign = TextAlign.Center,
+            minLines = 2,
+            maxLines = 2,
+        )
+        Spacer(Modifier.height(12.dp))
+        val vez = when {
+            conversa.suaVez && conversa.perguntandoSeContinua -> "🎤 Sua vez: yes or no?"
+            conversa.suaVez -> "🎤 Sua vez"
+            conversa.pensando -> "Pensando…"
+            else -> ""
+        }
+        Text(vez, color = VerdeVez, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        // Calado na sua vez: quanto falta pro bipe (na pergunta, pra valer como não); bipando, o jeito de parar
+        val faltam = ceil((SILENCIO_CONVERSA_MS - calado) / 1000.0).toInt().coerceAtLeast(0)
+        val aviso = when {
+            !conversa.suaVez || calado < REACAO_CONVERSA_MS -> ""
+            conversa.perguntandoSeContinua -> "$faltam s pra responder"
+            calado < SILENCIO_CONVERSA_MS -> "Bipe em $faltam s"
+            else -> "🔊 Fala que o bipe para"
+        }
+        Text(aviso, color = VermelhoAviso, fontSize = 28.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
     }
 }
 

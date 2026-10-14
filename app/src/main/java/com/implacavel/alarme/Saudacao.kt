@@ -1,7 +1,8 @@
 // Falas do alarme: a saudação depois do STOP ("Good morning! It's 5:05 AM. It's time for the activity
-// check."), o "Activity starting now." e os avisos de 10 em 10 min de câmera. Os textos são funções puras
-// (testadas em MissaoTest); a Voz grava a fala do sintetizador do celular num arquivo pra Sirene tocar no
-// alto-falante, como o resto do alarme. Quem decide a hora de cada fala é o AlarmeService.
+// check."), o "Activity starting now.", os avisos de 10 em 10 min de câmera e as falas fixas da conversa da
+// manhã com a IA. Os textos são funções puras (testadas em MissaoTest); a Voz grava a fala do sintetizador do
+// celular num arquivo pra Sirene tocar no alto-falante, como o resto do alarme. Quem decide a hora de cada fala
+// é o AlarmeService.
 package com.implacavel.alarme
 
 import android.content.Context
@@ -35,6 +36,20 @@ const val FALA_METADE = "Thank you very much for your effort, sir. You reached t
 const val FALA_FIM = "Congratulations, sir! The activity is done. Have a good time getting back to your activities."
 
 fun falaDosMinutos(minutos: Int) = "$minutos minutes passed."
+
+// Despertador com conversa e caminhada: as falas que não vêm da IA, gravadas junto com as outras fixas (só nesse alarme)
+
+/** A conversa chegou na meta: em vez da IA, esta pergunta (a resposta passa por querContinuar). */
+const val FALA_CONTINUAR = "Five minutes of conversation, sir. Do you want to keep talking a little more?"
+
+/** Fim da conversa, com a caminhada em seguida. */
+const val FALA_SAIR = "Great talk, sir. Now get dressed and go outside: you have seven minutes to start walking."
+
+/** Fim da conversa, com a câmera no lugar da caminhada (chuva, sem localização). */
+const val FALA_CAMERA = "Great talk, sir. It's not a day for walking, so let's do the camera activity."
+
+/** No lugar de uma fala da IA que manda descansar ou diz que o alarme acabou (respostaSegura). */
+const val FALA_NAO_NEGOCIA = "Not my call, sir. The alarm decides. Tell me, what is the first thing you will do today?"
 
 /**
  * O sintetizador de voz do celular, em inglês (roda sem internet com a voz instalada). Criado quando o

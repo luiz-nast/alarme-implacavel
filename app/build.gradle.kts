@@ -1,6 +1,22 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
+}
+
+// Ajustes deste PC, fora do git (local.properties). Nenhuma chave de IA entra no app: a conversa da manhã usa um
+// modelo no próprio celular (o Gemini, guardado em reserva/gemini, usava GEMINI_API_KEY; veja o LEIA-ME de lá)
+val locais = Properties().apply {
+    val arquivo = rootProject.file("local.properties")
+    if (arquivo.exists()) arquivo.inputStream().use { load(it) }
+}
+
+/** Valor de [chave] em local.properties (ou [padrao], se faltar ou estiver em branco) como texto Java do BuildConfig, entre aspas e escapado. */
+fun textoLocal(chave: String, padrao: String): String {
+    val valor = locais.getProperty(chave)?.trim()?.ifEmpty { null } ?: padrao
+    val escapado = valor.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r")
+    return "\"$escapado\""
 }
 
 android {
@@ -21,6 +37,8 @@ android {
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
+        // Metas do dono pra conversa da manhã (opcional). Em local.properties: METAS_URL=https://...
+        buildConfigField("String", "METAS_URL", textoLocal("METAS_URL", ""))
     }
 
     buildTypes {
@@ -40,6 +58,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true // BuildConfig.METAS_URL, lido de local.properties
     }
 }
 

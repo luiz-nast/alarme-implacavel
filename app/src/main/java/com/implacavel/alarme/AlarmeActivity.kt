@@ -70,7 +70,7 @@ import kotlinx.coroutines.delay
 /**
  * Tela do alarme tocando. Aberta pela notificação em tela cheia do [AlarmeService]; aparece por
  * cima da tela de bloqueio, acende a tela e fecha sozinha quando o alarme para.
- * Com a missão ligada, mostra as etapas de Missao.kt; sem ela, só o botão DESLIGAR.
+ * Com a missão ligada, mostra as etapas de Missao.kt (e a da caminhada, de Caminhada.kt); sem ela, só o botão DESLIGAR.
  */
 private const val TRANSPARENTE = android.graphics.Color.TRANSPARENT
 
@@ -126,6 +126,10 @@ private fun TelaAlarme(alarme: Alarme) {
     val silenciado by AlarmeService.silenciado.collectAsStateWithLifecycle()
     val saudando by AlarmeService.saudando.collectAsStateWithLifecycle()
     val verificacao by AlarmeService.verificacao.collectAsStateWithLifecycle()
+    val conversa by AlarmeService.conversa.collectAsStateWithLifecycle()
+    val caminhada by AlarmeService.caminhada.collectAsStateWithLifecycle()
+    // A meta da câmera vem do serviço: a de sempre (metaOlhar) ou, no despertador com conversa e caminhada, a do lugar da caminhada
+    val metaCamera by AlarmeService.metaCamera.collectAsStateWithLifecycle()
     val comemorando by AlarmeService.comemorando.collectAsStateWithLifecycle()
     val desbloqueado = celularDesbloqueado()
     val agora = agoraACada(1_000)
@@ -154,7 +158,7 @@ private fun TelaAlarme(alarme: Alarme) {
 
     // O YouTube da etapa da câmera vive enquanto esta tela estiver aberta; fora da etapa, pausado
     val youtube = rememberYoutubeDaMissao()
-    val etapaOlhar = alarme.missao && desbloqueado && silenciado && !saudando && !comemorando && verificacao == null
+    val etapaOlhar = alarme.missao && desbloqueado && silenciado && !saudando && !comemorando && verificacao == null && conversa == null && caminhada == null
     LaunchedEffect(etapaOlhar) { if (etapaOlhar) youtube.retomar() else youtube.pausar() }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(Brush.verticalGradient(fundo))) {
@@ -163,17 +167,33 @@ private fun TelaAlarme(alarme: Alarme) {
         val pagina: @Composable (@Composable () -> Unit) -> Unit = { conteudo ->
             PaginaAlarme(alturaMinima, deitado, rolagem, corTexto, pulso, hhmm(agora.toLocalTime()), alarme.nome, conteudo)
         }
-        val meta = metaOlhar(alarme)
         when {
             comemorando -> pagina { EtapaFim() }
             !alarme.missao -> pagina { BotaoGrande("DESLIGAR", { AlarmeService.desligar(ctx) }) }
             // Logo depois de o celular reiniciar, a voz do Google só roda depois do primeiro desbloqueio
             !desbloqueado -> pagina { EtapaDesbloquear() }
-            !silenciado -> pagina { EtapaFalar(meta, onStop = { AlarmeService.silenciar(ctx) }) }
-            saudando -> pagina { EtapaSaudacao(agora.hour) }
+            !silenciado -> pagina { EtapaFalar(metaCamera, onStop = { AlarmeService.silenciar(ctx) }) }
+            // Sem a IA do celular, o despertador com conversa e caminhada é a missão de sempre, com a mesma tela
+            saudando -> pagina { EtapaSaudacao(agora.hour, comConversa = alarme.caminhada && MotorDaConversa.disponivel(ctx)) }
             verificacao != null -> verificacao?.let { passo -> pagina { EtapaVerificacao(passo) } }
+            conversa != null -> conversa?.let { c -> pagina { EtapaConversa(c) } }
+            caminhada != null -> caminhada?.let { c ->
+                pagina {
+                    // Lido aqui dentro: só a etapa usa. O tempo andado em c vem atualizado do serviço (tela recriada no meio)
+                    val ultimoPasso by AlarmeService.ultimoPasso.collectAsStateWithLifecycle()
+                    EtapaCaminhada(
+                        andadoInicialMs = c.andadoMs,
+                        metaMs = c.metaMs,
+                        prazoAte = c.prazoAte,
+                        ultimoPasso = ultimoPasso,
+                        onAndando = { AlarmeService.andando(ctx, it) },
+                        onSemGps = { AlarmeService.semGps(ctx) },
+                        onConcluiu = { AlarmeService.missaoCumprida(ctx) },
+                    )
+                }
+            }
             else -> EtapaOlhar(
-                metaMs = meta,
+                metaMs = metaCamera,
                 onDefeito = { AlarmeService.missaoCumprida(ctx, comemorar = false) },
                 youtube = youtube,
                 pagina = pagina,

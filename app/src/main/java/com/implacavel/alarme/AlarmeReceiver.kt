@@ -15,7 +15,8 @@ import android.util.Log
 class AlarmeReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         when (intent.action) {
-            Agendador.ACAO_DISPARAR -> disparar(ctx, intent.getIntExtra(Agendador.EXTRA_ID, -1))
+            // Sem id, nenhum alarme (o -1 é o teste da caminhada)
+            Agendador.ACAO_DISPARAR -> disparar(ctx, intent.getIntExtra(Agendador.EXTRA_ID, Int.MIN_VALUE))
             Agendador.ACAO_RETOMAR -> {
                 val em = Ajustes.emAndamento ?: return // missão já cumprida: retomada velha
                 Log.i(TAG, "Retomada: alarme ${em.alarme.id} estava em andamento")
@@ -26,7 +27,11 @@ class AlarmeReceiver : BroadcastReceiver() {
 
     private fun disparar(ctx: Context, id: Int) {
         Log.i(TAG, "Disparo recebido: alarme $id")
-        val alarme = if (id == Alarme.ID_TESTE) Alarme.teste() else atualizarSalvo(ctx, id) ?: return
+        val alarme = when (id) {
+            Alarme.ID_TESTE -> Alarme.teste()
+            Alarme.ID_TESTE_CAMINHADA -> Alarme.teste(caminhada = true)
+            else -> atualizarSalvo(ctx, id) ?: return
+        }
         // Foto e rede de segurança antes do serviço: se o app cair daqui pra frente, o alarme volta.
         // Se outro alarme já está em andamento, os dois viram um (EmAndamento.juntar).
         // No meio da comemoração de outro alarme o volume está nos 40% dela: o de antes é o guardado

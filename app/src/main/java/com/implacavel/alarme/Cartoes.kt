@@ -43,10 +43,13 @@ fun Cabecalho(alarmes: List<Alarme>, agora: ZonedDateTime) {
     }
 }
 
-/** Lista as permissões que faltam, cada uma com um botão "Liberar". Some quando está tudo liberado. */
+/**
+ * Lista as permissões que faltam, cada uma com um botão "Liberar". Some quando está tudo liberado.
+ * [poderes] traz só os que importam agora ([poderesNecessarios]), na ordem do enum.
+ */
 @Composable
 fun CartaoPoderes(poderes: Map<Poder, Boolean>, onLiberar: (Poder) -> Unit) {
-    val faltando = Poder.entries.filter { poderes[it] != true }
+    val faltando = poderes.filterValues { liberado -> !liberado }.keys.toList()
     val cores = if (faltando.isEmpty()) {
         CardDefaults.cardColors()
     } else {
@@ -125,7 +128,11 @@ fun CartaoAlarme(alarme: Alarme, agora: ZonedDateTime, onLigar: (Boolean) -> Uni
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Text(
-                    if (alarme.remedio) "lembrete: toque suave" else "atividade: STOP + 40 min de câmera",
+                    when {
+                        alarme.remedio -> "lembrete: toque suave"
+                        alarme.caminhada -> "conversa e caminhada: STOP, IA e 18 min andando"
+                        else -> "atividade: STOP + 40 min de câmera"
+                    },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )
