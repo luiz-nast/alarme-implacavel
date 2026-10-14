@@ -44,6 +44,15 @@ object Ajustes {
         get() = prefs.getInt("volumeParaDevolver", -1).takeIf { it >= 0 }
         set(valor) = prefs.edit(commit = true) { if (valor == null) remove("volumeParaDevolver") else putInt("volumeParaDevolver", valor) }
 
+    /**
+     * O alarme (pelo [EmAndamento.desde]) em que a IA do celular já foi carregada. Se o app recomeça o mesmo
+     * alarme do zero (morreu no meio, por qualquer motivo), a IA fica de fora: pode ter sido ela. Gravado na hora
+     * (commit), pra valer mesmo se o app cair carregando o modelo.
+     */
+    var iaTentadaEm: Long
+        get() = prefs.getLong("iaTentadaEm", 0L)
+        set(valor) = prefs.edit(commit = true) { putLong("iaTentadaEm", valor) }
+
     /** Chamado uma vez em [App.onCreate]. */
     fun carregar(ctx: Context) {
         prefs = ctx.prefsProtegidas("ajustes")

@@ -3,7 +3,8 @@
 // (o adb tem a permissão DUMP, que nenhum app comum tem):
 //   adb shell am broadcast -n com.implacavel.alarme/.TesteDaIa
 //   adb logcat -s Implacavel
-// Com um alarme tocando, não roda (o modelo do alarme e o do teste não cabem juntos na memória).
+// Com um alarme tocando, não roda, e um alarme que começa no meio dele fica sem a IA ([ModeloLocal.emTeste]): o
+// modelo do alarme e o do teste não cabem juntos na memória.
 package com.implacavel.alarme
 
 import android.app.ActivityManager
@@ -39,8 +40,8 @@ private val FALAS_DE_TESTE = listOf(
 
 class TesteDaIa : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
-        if (Ajustes.emAndamento != null) {
-            Log.w(TAG, "IA teste: tem alarme tocando, o teste não roda")
+        if (Ajustes.emAndamento != null || ModeloLocal.emTeste) {
+            Log.w(TAG, "IA teste: tem alarme tocando (ou outro teste), o teste não roda")
             return
         }
         val arquivo = ModeloLocal.arquivo(ctx)
@@ -48,6 +49,7 @@ class TesteDaIa : BroadcastReceiver() {
             Log.w(TAG, "IA teste: modelo não está no celular (${arquivo?.path}, ${arquivo?.length()} bytes)")
             return
         }
+        ModeloLocal.emTeste = true
         val fim = goAsync()
         thread(name = "teste-da-ia") {
             try {
@@ -55,9 +57,17 @@ class TesteDaIa : BroadcastReceiver() {
             } catch (e: Throwable) {
                 Log.w(TAG, "IA teste: falhou (${e.javaClass.simpleName}: ${e.message?.take(160)})")
             } finally {
+                semMedicao()
+                ModeloLocal.emTeste = false
                 fim.finish()
             }
         }
+    }
+
+    /** A medição de velocidade vale pro processo inteiro: desliga, pra não ir junto pro modelo de um alarme depois. */
+    @OptIn(ExperimentalApi::class)
+    private fun semMedicao() {
+        ExperimentalFlags.enableBenchmark = false
     }
 
     @OptIn(ExperimentalApi::class) // a medição de velocidade (ExperimentalFlags.enableBenchmark)
@@ -68,18 +78,26 @@ class TesteDaIa : BroadcastReceiver() {
         Engine(EngineConfig(modelPath = caminho, backend = Backend.CPU(), maxNumTokens = 4096, cacheDir = ctx.cacheDir.path)).use { engine ->
             engine.initialize()
             Log.i(TAG, "IA teste: modelo carregado em ${SystemClock.elapsedRealtime() - inicio} ms (memória do app ${memoriaDoAppMb(ctx)} MB)")
-            val manchetes = listOf("Fim da escala 6x1: Senado faz última sessão - O GLOBO", "Petrobras e Vale sobem; dólar cai - g1", "Copa 2026: seleção treina hoje - ge")
+            // Do tamanho de uma manhã de verdade: as 5 manchetes e as metas cheias (o modelo lê tudo antes de falar)
+            val manchetes = List(MANCHETES_MAX) { "Manchete de teste número ${it + 1} sobre economia, política e esporte - g1" }
+            val metas = "Correr 5 km, estudar inglês e terminar o relatório do trabalho. ".repeat(20).take(METAS_MAX_LETRAS)
             val config = ConversationConfig(
-                systemInstruction = Contents.of(instrucaoDoTreinador(manchetes, "", LocalTime.now())),
+                systemInstruction = Contents.of(instrucaoDoTreinador(manchetes, metas, LocalTime.now())),
                 samplerConfig = SamplerConfig(topK = 40, topP = 0.95, temperature = 0.8),
                 prefillPrefaceOnInit = true,
                 maxOutputToken = 120,
                 thinkingConfig = ThinkingConfig(enableThinking = false),
             )
+            val antesDaInstrucao = SystemClock.elapsedRealtime()
             engine.createConversation(config).use { conversa ->
+                Log.i(TAG, "IA teste: instrução lida em ${SystemClock.elapsedRealtime() - antesDaInstrucao} ms")
                 for (fala in FALAS_DE_TESTE) {
                     if (SystemClock.elapsedRealtime() - inicio > TESTE_MAX_MS) {
                         Log.w(TAG, "IA teste: passou de ${TESTE_MAX_MS / 1000} s, parando")
+                        return
+                    }
+                    if (Ajustes.emAndamento != null) {
+                        Log.w(TAG, "IA teste: um alarme começou, parando")
                         return
                     }
                     val antes = SystemClock.elapsedRealtime()

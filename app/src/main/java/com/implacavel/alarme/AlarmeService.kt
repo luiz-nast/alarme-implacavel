@@ -170,6 +170,11 @@ class AlarmeService : Service() {
         /** true = a pessoa já disse "stop" e a música está calada: a tela do alarme mostra a etapa da câmera. */
         val silenciado: StateFlow<Boolean> = _silenciado.asStateFlow()
 
+        private val _comConversa = MutableStateFlow(false)
+
+        /** Esta manhã vai ter a conversa com a IA (até decidir o caminho, a tela do bom dia diz "Preparando a manhã…"). */
+        val comConversa: StateFlow<Boolean> = _comConversa.asStateFlow()
+
         private val _saudando = MutableStateFlow(false)
 
         /** true = acabou de dizer "stop" e a voz está dando bom dia: a tela mostra a saudação, ainda sem câmera. */
@@ -495,6 +500,7 @@ class AlarmeService : Service() {
         _conversa.value = null
         _caminhada.value = null
         _tocando.value = null
+        _comConversa.value = false
         _metaCamera.value = META_OLHAR_MS
         if (processador.isHeld) processador.release()
         super.onDestroy()
@@ -528,14 +534,15 @@ class AlarmeService : Service() {
         // Se a meta subiu (alarme de verdade no lugar do teste), a verificação da metade vale de novo
         if (jaTocava) {
             ajustarManha(alarme)
+            if (caminho == null) prepararIa(alarme, em)
             if (!cameraNoLugarDaCaminhada && _olhado.value < metaOlhar(alarme) / 2) _metadeVerificada.value = false
             return
         }
         Log.i(TAG, "Serviço: tocando \"${alarme.nome}\" (missão=${alarme.missao}, remédio=${alarme.remedio}, caminhada=${alarme.caminhada}, quedas=$quedas)")
         // O modelo começa a carregar já, com a música, pra estar pronto no fim do bom dia. Se o app já saiu sozinho
         // neste alarme (queda, travamento ou falta de memória), pode ter sido ele: a manhã fica sendo a de sempre
-        iaBloqueada = saiuSozinhoDesde(em.desde)
-        if (comConversaECaminhada(alarme) && !iaBloqueada && MotorDaConversa.disponivel(this)) MotorDaConversa.preparar(this)
+        iaBloqueada = saiuSozinhoDesde(em.desde) || Ajustes.iaTentadaEm == em.desde
+        prepararIa(alarme, em)
         telaAberta = true
         _silenciado.value = false
         _saudando.value = false
@@ -545,6 +552,16 @@ class AlarmeService : Service() {
         _caminhada.value = null
         sirene.tocar()
         handler.post(renovar)
+    }
+
+    /**
+     * Começa a carregar o modelo da IA (o despertador com conversa e caminhada, sem a IA bloqueada) e grava que
+     * ela foi tentada neste alarme ([Ajustes.iaTentadaEm]). Já carregado ou carregando, não faz nada de novo.
+     */
+    private fun prepararIa(alarme: Alarme, em: EmAndamento) {
+        if (!comConversaECaminhada(alarme) || iaBloqueada || !MotorDaConversa.disponivel(this)) return
+        Ajustes.iaTentadaEm = em.desde
+        MotorDaConversa.preparar(this)
     }
 
     /**
@@ -788,8 +805,11 @@ class AlarmeService : Service() {
             Log.i(TAG, "Conversa: ${if (iaBloqueada) "o app já caiu neste alarme" else "sem a IA no celular"}, a missão de sempre")
             MotorDaConversa.liberar()
             caminho = CaminhoDaManha.ANTIGO
+            _comConversa.value = false
             return
         }
+        Ajustes.emAndamento?.let { Ajustes.iaTentadaEm = it.desde }
+        _comConversa.value = true
         val rodada = rodadaConversa
         abertura = null
         aberturaChegou = false
@@ -867,6 +887,7 @@ class AlarmeService : Service() {
             motor?.desligar()
             motor = null
             MotorDaConversa.liberar()
+            _comConversa.value = false
             // Igual ao alarme de sempre, com o mesmo prazo se a voz travar
             handler.removeCallbacks(comecarAtividade)
             handler.postDelayed(comecarAtividade, SAUDACAO_MAX_MS)

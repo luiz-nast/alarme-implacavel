@@ -30,7 +30,7 @@ import java.util.concurrent.Executors
 const val ARQUIVO_DO_MODELO = "gemma-4-E2B-it.litertlm"
 const val TAMANHO_DO_MODELO = 2_588_147_712L
 
-/** Memória livre pra carregar o modelo (ele usa uns 1,5 GB) sem o Android matar o app no meio. */
+/** Memória livre pra carregar o modelo com folga (carregado, o app fica com ~520 MB: medido no S24 FE) sem o Android matar o app. */
 private const val MEMORIA_MINIMA = 1_500L * 1024 * 1024
 
 /** Quanto de conversa (instrução, falas e respostas, em tokens) cabe: uns 8 min de conversa, com folga. */
@@ -53,6 +53,10 @@ class ModeloLocal(ctx: Context, private val instrucao: String, private val falaN
         private val trabalho = Executors.newSingleThreadExecutor { Thread(it, "gemma").apply { isDaemon = true } }
 
         @Volatile private var engine: Engine? = null // carregado, pras conversas do mesmo alarme; só mexido na thread do modelo
+        @Volatile private var carregando = false // o [preparar] está carregando: a memória que ele ocupa não conta contra
+
+        /** O teste pelo cabo ([TesteDaIa]) está com o modelo dele: um alarme agora não carrega outro (não cabem os dois). */
+        @Volatile var emTeste = false
 
         /** O arquivo do modelo na pasta do app (Android/data/com.implacavel.alarme/files/). */
         fun arquivo(ctx: Context): File? = ctx.getExternalFilesDir(null)?.let { File(it, ARQUIVO_DO_MODELO) }
@@ -62,7 +66,8 @@ class ModeloLocal(ctx: Context, private val instrucao: String, private val falaN
          * memória livre pra carregar ([MEMORIA_MINIMA]). Já carregado, sim.
          */
         fun disponivel(ctx: Context): Boolean {
-            if (engine != null) return true
+            if (emTeste) return false
+            if (engine != null || carregando) return true
             if ("arm64-v8a" !in Build.SUPPORTED_64_BIT_ABIS) return false
             if (arquivo(ctx)?.length() != TAMANHO_DO_MODELO) return false
             return memoriaLivre(ctx) >= MEMORIA_MINIMA
@@ -75,7 +80,14 @@ class ModeloLocal(ctx: Context, private val instrucao: String, private val falaN
         /** Começa a carregar o modelo em segundo plano (pode chamar de novo: não carrega duas vezes). */
         fun preparar(ctx: Context) {
             val app = ctx.applicationContext
-            trabalho.execute { runCatching { carregado(app) } }
+            carregando = true
+            trabalho.execute {
+                try {
+                    runCatching { carregado(app) }
+                } finally {
+                    carregando = false
+                }
+            }
         }
 
         /** Tira o modelo da memória, depois do que estiver em curso na thread dele. */
@@ -114,8 +126,8 @@ class ModeloLocal(ctx: Context, private val instrucao: String, private val falaN
     private val app = ctx.applicationContext
     @Volatile private var conversa: Conversation? = null // criada no primeiro pedido, com a instrução, na thread do modelo
     @Volatile private var escrevendo = false // o modelo está gerando uma resposta agora
-    private var pedidos = 0 // muda a cada pedido e cancelamento: resposta de um pedido velho não chega
-    private var desligado = false
+    @Volatile private var pedidos = 0 // muda a cada pedido e cancelamento: resposta de um pedido velho não chega
+    @Volatile private var desligado = false
 
     override fun abrir(aoResponder: (String?) -> Unit) = perguntar(PEDIDO_DE_ABERTURA, aoResponder)
 
@@ -150,6 +162,7 @@ class ModeloLocal(ctx: Context, private val instrucao: String, private val falaN
             if (numero != pedidos || desligado) return@execute // cancelado antes de chegar a vez dele
             val resposta = try {
                 val c = conversaPronta()
+                if (numero != pedidos || desligado) return@execute // cancelado enquanto carregava ou lia a instrução
                 escrevendo = true
                 textoDe(c.sendMessage(fala))
             } catch (e: Throwable) {

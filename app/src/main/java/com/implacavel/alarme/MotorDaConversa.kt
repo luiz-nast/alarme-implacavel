@@ -11,11 +11,12 @@ data class Turno(val daIa: Boolean, val texto: String)
 
 /**
  * Uma conversa com a IA: [abrir] pede a primeira fala, [responder] manda o que a pessoa disse, [retomar]
- * continua depois de uma interrupção. Cada pedido chama o `aoResponder` uma vez só, na thread principal, em
- * até [RESPOSTA_IA_MAX_MS], com a fala pronta pra voz ([limparFala]; se não for [respostaSegura], a frase
+ * continua depois de uma interrupção. Cada pedido chama o `aoResponder` uma vez só, na thread principal, com a
+ * fala pronta pra voz ([limparFala]; se não for [respostaSegura], a frase
  * fixa no lugar) ou null (sem resposta). Um pedido novo toma o lugar do que ainda não respondeu; depois de
  * [cancelar] ou [desligar], resposta atrasada não chega em ninguém. [criar] e os pedidos voltam na hora: carregar
- * o modelo e gerar a fala é em outra thread (o serviço ainda corta a espera em [RESPOSTA_IA_MAX_MS]).
+ * o modelo e gerar a fala é em outra thread. O motor pode demorar ou nem responder: quem corta a espera é o
+ * AlarmeService ([RESPOSTA_IA_MAX_MS] por fala, e o prazo da decisão depois do bom dia pra abertura).
  */
 interface MotorDaConversa {
     fun abrir(aoResponder: (String?) -> Unit)
