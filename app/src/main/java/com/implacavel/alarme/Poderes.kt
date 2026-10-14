@@ -18,7 +18,6 @@ import androidx.core.net.toUri
  * Cada permissão que o alarme precisa, com a checagem ([liberado]) e o jeito de liberar.
  * [permissao] é a permissão pedida com o diálogo do sistema, quando existe (o pedido vai com [pedido]); as
  * demais, e as já negadas no diálogo, são liberadas numa tela das Configurações ([abrirConfiguracao]).
- * A tela principal só mostra os de [poderesNecessarios].
  */
 enum class Poder(val titulo: String, val explicacao: String, val permissao: String? = null) {
     NOTIFICACOES(
@@ -28,7 +27,7 @@ enum class Poder(val titulo: String, val explicacao: String, val permissao: Stri
     ),
     MICROFONE("Microfone", "Pra ouvir você dizer STOP.", Manifest.permission.RECORD_AUDIO),
     CAMERA("Câmera", "Pra conferir que você está de olhos abertos.", Manifest.permission.CAMERA),
-    LOCALIZACAO("Localização", "Pra conferir a caminhada da manhã.", Manifest.permission.ACCESS_FINE_LOCATION),
+    LOCALIZACAO("Localização", "Pra conferir a caminhada da manhã e saber se chove.", Manifest.permission.ACCESS_FINE_LOCATION),
     ALARME_EXATO("Alarme no minuto exato", "Toca na hora certa mesmo com o celular dormindo."),
     TELA_CHEIA("Tela cheia", "Deixa o alarme tomar a tela, mesmo bloqueada."),
     CANAL("Alerta em destaque", "O canal \"Alarme tocando\" precisa estar com importância alta."),
@@ -87,10 +86,3 @@ enum class Poder(val titulo: String, val explicacao: String, val permissao: Stri
 
     private fun pacote(ctx: Context) = "package:${ctx.packageName}".toUri()
 }
-
-/**
- * Os poderes que a tela principal confere e pede com estes [alarmes]: todos, menos a localização, que só
- * entra se algum alarme salvo tem caminhada (quem não usa a caminhada não é incomodado).
- */
-fun poderesNecessarios(alarmes: List<Alarme>): List<Poder> =
-    Poder.entries.filter { it != Poder.LOCALIZACAO || alarmes.any { alarme -> alarme.caminhada } }

@@ -22,7 +22,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -61,10 +60,9 @@ private fun TelaPrincipal() {
     val agora = agoraACada(15_000) // pros textos "toca em 9 h 12 min"
     var editando by remember { mutableStateOf<Alarme?>(null) }
 
-    // Permissões: relidas toda vez que a tela volta (do diálogo do sistema ou das Configurações) e quando
-    // um alarme com caminhada aparece ou some (só aí a localização entra na lista)
-    val usaCaminhada = alarmes.any { it.caminhada }
-    val poderes = lidoAoVoltar(usaCaminhada) { poderesNecessarios(alarmes).associateWith { it.liberado(ctx) } }
+    // Permissões e a IA do celular: relidas toda vez que a tela volta (do diálogo do sistema ou das Configurações)
+    val poderes = lidoAoVoltar { Poder.entries.associateWith { it.liberado(ctx) } }
+    val iaPronta = lidoAoVoltar { MotorDaConversa.disponivel(ctx) }
 
     // Permissões com diálogo do sistema (notificação, microfone, câmera, localização). Se o usuário já
     // negou, o sistema não pergunta de novo; aí, se o pedido veio de um botão "Liberar", abre as Configurações.
@@ -124,17 +122,13 @@ private fun TelaPrincipal() {
                 )
             }
             item {
-                OutlinedButton(
-                    onClick = {
+                SecaoTestes(
+                    iaPronta = iaPronta,
+                    onTestar = {
                         Agendador.agendarTeste(ctx, 10)
                         Toast.makeText(ctx, "Toca em 10 segundos. Bloqueie a tela pra ver o efeito completo.", Toast.LENGTH_LONG).show()
                     },
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("Testar agora (toca em 10 s)") }
-            }
-            item {
-                OutlinedButton(
-                    onClick = {
+                    onTestarCaminhada = {
                         // Sem a localização, a caminhada vira câmera: pede no diálogo agora (sem abrir as Configurações;
                         // ela só é conferida depois do STOP e do bom dia)
                         val comIa = MotorDaConversa.disponivel(ctx)
@@ -142,14 +136,13 @@ private fun TelaPrincipal() {
                         if (semLocalizacao && comIa) pedirPermissao.launch(Poder.LOCALIZACAO.pedido)
                         Agendador.agendarTeste(ctx, 10, caminhada = true)
                         val aviso = when {
-                            !comIa -> "A IA do celular ainda não está no app: vai ser a missão de sempre."
+                            !comIa -> "A IA do celular não está pronta: vai ser a missão de sempre."
                             semLocalizacao -> "Libere a localização no aviso, senão a caminhada vira câmera."
                             else -> "Bloqueie a tela pra ver o efeito completo."
                         }
                         Toast.makeText(ctx, "Toca em 10 segundos. $aviso", Toast.LENGTH_LONG).show()
                     },
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("Testar conversa e caminhada (toca em 10 s)") }
+                )
             }
             items(alarmes, key = { it.id }) { alarme ->
                 CartaoAlarme(

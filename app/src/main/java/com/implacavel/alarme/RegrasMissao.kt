@@ -9,7 +9,7 @@ import kotlin.math.roundToInt
 /** Tempo olhando pra câmera, de olhos abertos, pra desligar o alarme. */
 const val META_OLHAR_MS = 40 * 60_000L
 
-/** No botão "Testar agora" a câmera pede só isto: teste tem que ser rápido. */
+/** No botão "Testar o alarme de sempre" a câmera pede só isto: teste tem que ser rápido. */
 const val META_OLHAR_TESTE_MS = 30_000L
 
 /**

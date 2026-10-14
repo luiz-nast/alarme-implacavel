@@ -82,7 +82,7 @@ data class Alarme(
         .put("caminhada", caminhada)
 
     companion object {
-        /** Id reservado pro botão "Testar agora". Os alarmes salvos começam em 1. */
+        /** Id reservado pro botão "Testar o alarme de sempre". Os alarmes salvos começam em 1. */
         const val ID_TESTE = 0
 
         /** Id reservado pro botão "Testar conversa e caminhada". */

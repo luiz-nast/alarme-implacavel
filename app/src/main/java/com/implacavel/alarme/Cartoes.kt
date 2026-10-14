@@ -1,8 +1,11 @@
-// Blocos da tela principal: cabeçalho, cartão de permissões, cartão da música e cartão de cada alarme.
+// Blocos da tela principal: cabeçalho, permissões e testes (que abrem e fecham), cartão da música e cartão de cada alarme.
 package com.implacavel.alarme
 
 import android.os.Build
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -12,10 +15,16 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -44,55 +53,87 @@ fun Cabecalho(alarmes: List<Alarme>, agora: ZonedDateTime) {
 }
 
 /**
- * Lista as permissões que faltam, cada uma com um botão "Liberar". Some quando está tudo liberado.
- * [poderes] traz só os que importam agora ([poderesNecessarios]), na ordem do enum.
+ * Um bloco da tela principal que abre e fecha num toque: fechado, só o [titulo] e o [resumo] (em vermelho com
+ * [alerta]); aberto, o [conteudo]. Começa aberto com [alerta], e abre sozinho quando o alerta aparece.
  */
 @Composable
-fun CartaoPoderes(poderes: Map<Poder, Boolean>, onLiberar: (Poder) -> Unit) {
-    val faltando = poderes.filterValues { liberado -> !liberado }.keys.toList()
-    val cores = if (faltando.isEmpty()) {
-        CardDefaults.cardColors()
-    } else {
+fun SecaoRecolhivel(titulo: String, resumo: String, alerta: Boolean, conteudo: @Composable ColumnScope.() -> Unit) {
+    var aberta by rememberSaveable { mutableStateOf(alerta) }
+    LaunchedEffect(alerta) { if (alerta) aberta = true }
+    val cores = if (alerta) {
         CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.errorContainer,
             contentColor = MaterialTheme.colorScheme.onErrorContainer,
         )
+    } else {
+        CardDefaults.cardColors()
     }
     Card(colors = cores, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp)) {
-            if (faltando.isEmpty()) {
-                Text("✓ Todos os poderes liberados", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Text(
-                    "O alarme toca com a tela bloqueada, no modo silencioso e passando pelo Não Perturbe.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            } else {
-                val palavra = if (faltando.size == 1) "poder" else "poderes"
-                Text(
-                    "Faltam ${faltando.size} $palavra pro alarme ser implacável",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                )
-                faltando.forEach { poder ->
-                    Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(poder.titulo, fontWeight = FontWeight.SemiBold)
-                            Text(poder.explicacao, style = MaterialTheme.typography.bodySmall)
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        Button(onClick = { onLiberar(poder) }) { Text("Liberar") }
-                    }
-                }
+        Row(
+            Modifier.fillMaxWidth().clickable { aberta = !aberta }.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(titulo, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(resumo, style = MaterialTheme.typography.bodyMedium)
             }
-            if (Build.MANUFACTURER.equals("samsung", ignoreCase = true)) {
-                Text(
-                    "Samsung: em Configurações › Bateria › Limites de uso em segundo plano, confira que o app " +
-                        "não está em \"Apps em suspensão\" nem em \"Apps em suspensão profunda\".",
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(top = 12.dp),
-                )
+            Text(if (aberta) "▴" else "▾", fontSize = 22.sp)
+        }
+        AnimatedVisibility(aberta) {
+            Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp), content = conteudo)
+        }
+    }
+}
+
+/**
+ * As permissões do alarme ([poderes]: cada uma e se está liberada), recolhidas: fechado, só "✓ Todas
+ * liberadas" ou quantas faltam; aberto, todas, cada uma com ✓ ou com o botão "Liberar". Faltando alguma,
+ * aparece aberto e em vermelho.
+ */
+@Composable
+fun CartaoPoderes(poderes: Map<Poder, Boolean>, onLiberar: (Poder) -> Unit) {
+    val faltam = poderes.count { !it.value }
+    val resumo = when (faltam) {
+        0 -> "✓ Todas liberadas: o alarme toca bloqueado, no silencioso e no Não Perturbe"
+        1 -> "⚠ Falta 1 pro alarme ser implacável"
+        else -> "⚠ Faltam $faltam pro alarme ser implacável"
+    }
+    SecaoRecolhivel("Permissões", resumo, alerta = faltam > 0) {
+        poderes.forEach { (poder, liberado) ->
+            Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(poder.titulo, fontWeight = FontWeight.SemiBold)
+                    Text(poder.explicacao, style = MaterialTheme.typography.bodySmall)
+                }
+                Spacer(Modifier.width(8.dp))
+                if (liberado) Text("✓", fontSize = 20.sp, fontWeight = FontWeight.Bold) else Button(onClick = { onLiberar(poder) }) { Text("Liberar") }
             }
         }
+        if (Build.MANUFACTURER.equals("samsung", ignoreCase = true)) {
+            Text(
+                "Samsung: em Configurações › Bateria › Limites de uso em segundo plano, confira que o app " +
+                    "não está em \"Apps em suspensão\" nem em \"Apps em suspensão profunda\".",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 12.dp),
+            )
+        }
+    }
+}
+
+/**
+ * Os botões de teste (tocam em 10 s), recolhidos: o alarme de sempre e o despertador com conversa e caminhada,
+ * e se a IA do celular está pronta ([iaPronta]: o modelo copiado pro celular e memória livre).
+ */
+@Composable
+fun SecaoTestes(iaPronta: Boolean, onTestar: () -> Unit, onTestarCaminhada: () -> Unit) {
+    SecaoRecolhivel("Testes", "Tocam em 10 s, pra conferir o alarme", alerta = false) {
+        OutlinedButton(onClick = onTestar, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Testar o alarme de sempre") }
+        OutlinedButton(onClick = onTestarCaminhada, modifier = Modifier.fillMaxWidth()) { Text("Testar conversa e caminhada") }
+        Text(
+            if (iaPronta) "IA do celular pronta (Gemma 4 E2B, sem internet)" else "IA do celular sem o modelo: o teste com conversa vira o alarme de sempre",
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(top = 4.dp),
+        )
     }
 }
 

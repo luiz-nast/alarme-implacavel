@@ -39,7 +39,7 @@ Há também o **despertador com conversa e caminhada**: depois do STOP, 5 minuto
 | Botões de volume não calam | `onKeyDown` consome volume-baixo e mudo | `AlarmeActivity.kt` |
 | Sobrevive a reinício | Reagenda no boot, inclusive antes do 1º desbloqueio (direct boot), e toda vez que o app é aberto (não ao girar a tela) | `BootReceiver.kt`, `MainActivity.kt`, `Alarmes.kt` |
 | Repetição por dia da semana | `dias` usa `DayOfWeek.value` (1 = seg … 7 = dom) | `Alarme.kt` |
-| Checklist de permissões | Mostra o que falta e pede no diálogo do sistema ou abre a tela certa das Configurações | `Poderes.kt`, `Cartoes.kt` |
+| Checklist de permissões | Bloco "Permissões" que abre e fecha (`SecaoRecolhivel`): fechado, "✓ Todas liberadas" ou quantas faltam; aberto, todas (a localização também), cada uma com ✓ ou "Liberar", que pede no diálogo do sistema ou abre a tela certa das Configurações. Faltando alguma, aparece aberto e em vermelho. Os botões de teste ficam em outro bloco recolhido, "Testes", com o estado da IA do celular | `Poderes.kt`, `Cartoes.kt` |
 
 ## Como compilar e instalar
 
@@ -159,7 +159,7 @@ Código em `app/src/main/java/com/implacavel/alarme/`. Cada arquivo começa com 
 | `PaginaYoutube.kt` | `YoutubeDaMissao` (o WebView: criado ao abrir a página, pausado fora da etapa e da tela, à prova de queda da página e de links pra fora) e `PaginaYoutube` |
 | `RegrasMissao.kt` | Regras puras da missão: `disseStop`, `classificarRosto`, `metaOlhar`, `avancarOlhar`, `segundosParaZerar`, `volumeDoBipe`, `linkFicaNaPagina` e os tempos |
 | `MainActivity.kt` | Tela principal: estado, pedidos de permissão, seletor de música, lista. Reagenda tudo ao abrir |
-| `Cartoes.kt` | Cabeçalho, cartão de permissões, cartão da música e cartão de cada alarme |
+| `Cartoes.kt` | Cabeçalho, os blocos que abrem e fecham (`SecaoRecolhivel`: permissões e testes), cartão da música e cartão de cada alarme |
 | `EditorAlarme.kt` | Diálogo de criar e editar alarme |
 | `Formatacao.kt` | Textos de hora, dias e tempo que falta no anel (funções puras) |
 | `Tema.kt` | Tema sempre claro (sem versão noturna: o YouTube da etapa da câmera também abre claro), cores fixas da tela do alarme (`VermelhoAlarme`, `VinhoAlarme`), o relógio `agoraACada` e `lidoAoVoltar` (relê permissões quando a tela volta do diálogo ou das Configurações) |
@@ -228,7 +228,7 @@ Outros arquivos:
 | `RECORD_AUDIO` | Ouvir o "stop" | Diálogo, pelo botão "Liberar" |
 | `CAMERA` | Ver os olhos abertos | Diálogo, pelo botão "Liberar" |
 | `INTERNET` | O YouTube da etapa da câmera; as notícias, as metas e o clima do despertador com conversa e caminhada (a IA é do celular) | Automática |
-| `ACCESS_FINE_LOCATION` + `ACCESS_COARSE_LOCATION` | Contar a caminhada pelo GPS e saber se chove no lugar | Diálogo, pelo botão "Liberar"; só aparece com um alarme com caminhada salvo, ou ao tocar em "Testar conversa e caminhada" |
+| `ACCESS_FINE_LOCATION` + `ACCESS_COARSE_LOCATION` | Contar a caminhada pelo GPS e saber se chove no lugar | Diálogo, pelo botão "Liberar" do bloco de permissões, ou ao tocar em "Testar conversa e caminhada" |
 | `USE_EXACT_ALARM` / `SCHEDULE_EXACT_ALARM` (Android 12) | `setAlarmClock` | Automática (Android 13+) / Configurações |
 | `USE_FULL_SCREEN_INTENT` | Tomar a tela | Automática fora da Play; conferida em `Poderes` |
 | `FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_SPECIAL_USE` | `AlarmeService` | Automática |
@@ -274,7 +274,7 @@ Outros arquivos:
 - **Nova opção por alarme** (ex.: música própria de cada alarme): campo em `Alarme` com valor padrão, lido em `deJson` com `opt…` pra não quebrar alarmes já salvos; switch ou campo no `EditorAlarme`; uso no `AlarmeService` ou na `Sirene`.
 - **Nova etapa ou nova missão:** regra pura em `RegrasMissao.kt` com teste em `MissaoTest`, tela em `Missao.kt` e a escolha da etapa no `when` de `TelaAlarme` (`AlarmeActivity.kt`). O estado da etapa fica no serviço (como `AlarmeService.silenciado`), pra sobreviver à tela fechar.
 - **Novo comando pro serviço:** constante `ACAO_…`, função no companion do `AlarmeService` e ramo no `when` do `onStartCommand`.
-- **Nova permissão:** entrada no `enum Poder` com a checagem em `liberado` e a tela em `telaParaLiberar`. O cartão de permissões mostra sozinho.
+- **Nova permissão:** entrada no `enum Poder` com a checagem em `liberado` e a tela em `telaParaLiberar`. O bloco de permissões mostra sozinho.
 
 ## Convenções pra quem for mexer (pessoa ou IA)
 
@@ -282,7 +282,7 @@ Outros arquivos:
 - Regras ficam em Kotlin puro (`Alarme.kt`, `Formatacao.kt`, `RegrasMissao.kt`) e têm teste. Mexeu nelas? Rode `./gradlew testDebugUnitTest`.
 - Tempos e limiares da missão ficam nas constantes do topo de `RegrasMissao.kt` e `Missao.kt`.
 - Antes de subir mudança: `./gradlew assembleRelease lintDebug testDebugUnitTest`, com 0 erros de lint.
-- `Alarme.ID_TESTE = 0` é reservado pro botão "Testar agora" e `Alarme.ID_TESTE_CAMINHADA = -1` pro "Testar conversa e caminhada"; alarmes salvos começam em 1.
+- `Alarme.ID_TESTE = 0` é reservado pro botão "Testar o alarme de sempre" e `Alarme.ID_TESTE_CAMINHADA = -1` pro "Testar conversa e caminhada"; alarmes salvos começam em 1.
 - Tempos e limiares da conversa e da caminhada ficam no topo de `RegrasConversa.kt` e `RegrasCaminhada.kt`.
 - Regra de ouro: só `AlarmeService.concluir` (missão cumprida ou DESLIGAR) apaga `Ajustes.emAndamento` e cancela a retomada. Nada mais (tela, receiver, edição ou exclusão de alarme) pode encerrar um alarme em andamento.
 - Imports explícitos, sem curinga.

@@ -22,7 +22,7 @@
     <!-- O YouTube ao lado da câmera, na etapa da câmera (PaginaYoutube.kt), e no despertador com
          conversa e caminhada: as notícias, a chuva e as metas (a IA roda no celular) -->
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- Caminhada da manhã pelo GPS e a chuva do lugar. Só pedida se algum alarme tem caminhada (Poder.LOCALIZACAO);
+    <!-- Caminhada da manhã pelo GPS e a chuva do lugar. Pedida no botão "Liberar" das permissões (Poder.LOCALIZACAO);
          no Android 12+, a precisa (FINE) tem que ser pedida junto com a aproximada (COARSE) -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
