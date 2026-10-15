@@ -162,11 +162,11 @@ class AlarmeTest {
         assertEquals(7, remedio.volumeAgora(maximo = 15, agoraMs = 60_000)) // 45% (6,75)
         assertEquals(11, remedio.volumeAgora(maximo = 15, agoraMs = 120_000)) // 75% (11,25)
         assertEquals(11, remedio.volumeAgora(maximo = 15, agoraMs = 900_000))
-        // Os avisos saem sempre no fim da subida, mesmo logo no começo dela; a voz, um pouco abaixo
+        // Os avisos saem sempre no fim da subida, mesmo logo no começo dela; a voz, um pouco acima
         val alarme = EmAndamento(Alarme(1, 7, 0), desde = 0, musica = null, volume = 2)
         assertEquals(6, alarme.volumeDosAvisos(maximo = 15)) // 40%
         assertEquals(11, remedio.volumeDosAvisos(maximo = 15)) // 75%
-        assertEquals(5, alarme.volumeDaVoz(maximo = 15)) // 30% (4,5): um degrau abaixo da música
+        assertEquals(7, alarme.volumeDaVoz(maximo = 15)) // 45% (6,75): um degrau acima da música
         // Remédio junto com um alarme de música: fica a música
         assertFalse(remedio.juntar(Alarme(3, 8, 0), agora = 10).alarme.remedio)
         assertTrue(remedio.juntar(Alarme(4, 8, 0, remedio = true), agora = 10).alarme.remedio)

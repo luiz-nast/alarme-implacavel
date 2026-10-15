@@ -275,23 +275,24 @@ fun EtapaVerificacao(passo: Verificacao) {
 /**
  * Entre o STOP e a câmera, enquanto a voz do celular dá bom dia ([AlarmeService.saudando]): a câmera
  * começa uns segundos depois que ela termina. [hora] escolhe entre bom dia, boa tarde e boa noite. No
- * despertador [comConversa] e caminhada, a tela fica aqui até a IA responder (uns segundos depois do bom dia).
+ * despertador "conversa + caminhada" ([caminhada]), a tela fica aqui até a IA responder (uns segundos depois do bom dia).
  */
 @Composable
-fun EtapaSaudacao(hora: Int, comConversa: Boolean = false) {
+fun EtapaSaudacao(hora: Int, caminhada: Boolean = false) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text("${saudacao(hora)}!", color = VinhoAlarme, fontSize = 34.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
         Text("It's time for the activity check", color = VinhoAlarme, fontSize = 20.sp, textAlign = TextAlign.Center)
         Spacer(Modifier.height(16.dp))
-        Text(if (comConversa) "Preparando a manhã…" else "A câmera já vai começar", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 16.sp)
+        Text(if (caminhada) "Preparando a manhã…" else "A câmera já vai começar", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 16.sp)
     }
 }
 
 /**
  * Conversa da manhã com a IA ([AlarmeService.conversa]): mostra a fala da IA e, na vez da pessoa, escuta em
- * inglês e mostra o que ouve ("Ouvi: …"). Qualquer fala ouvida avisa o serviço ([AlarmeService.ouviu]) e cada
- * frase terminada vai pra ele ([AlarmeService.respondeu]); a vez de cada um, o relógio da conversa e os bipes do
- * silêncio são de lá. O anel enche com o tempo de conversa ("3:12 de 5:00"); em silêncio na sua vez, a contagem
+ * inglês e mostra o que ouve ("Ouvi: …", com as frases já terminadas desta vez). Qualquer fala ouvida avisa o
+ * serviço ([AlarmeService.ouviu]) e cada frase terminada vai pra ele ([AlarmeService.respondeu]), que espera ela
+ * parar de falar pra mandar tudo pra IA; a vez de cada um, o relógio da conversa e os bipes do
+ * silêncio são de lá. O anel enche com o tempo de conversa ("3:12 de 10:00"); em silêncio na sua vez, a contagem
  * pro bipe (a partir de [AlarmeService.ultimaFala]). Sem reconhecimento de voz, o serviço encerra a conversa.
  */
 @Composable
@@ -299,18 +300,22 @@ fun EtapaConversa(conversa: Conversa) {
     val ctx = LocalContext.current
     // O que a pessoa disse nesta vez: fica na tela enquanto a IA pensa, e some quando chega a vez seguinte
     var ouvido by remember(conversa.vez) { mutableStateOf("") }
+    var frasesDitas by remember(conversa.vez) { mutableStateOf("") } // as já terminadas: a fala pode vir em pedaços
     if (conversa.suaVez) {
         DisposableEffect(conversa.vez) {
             val ouvinte = Ouvinte(
                 ctx, "resposta", aceita = { false },
                 onOuviu = {
-                    ouvido = it
+                    ouvido = "$frasesDitas $it".trim()
                     AlarmeService.ouviu(ctx)
                 },
                 onAceito = {},
                 onIndisponivel = { AlarmeService.semVozNaConversa(ctx) },
                 idioma = "en-US",
-                onFraseFinal = { AlarmeService.respondeu(ctx, it) },
+                onFraseFinal = {
+                    frasesDitas = "$frasesDitas $it".trim()
+                    AlarmeService.respondeu(ctx, it)
+                },
                 registrarFala = false, // a conversa não vai pro log (privacidade)
             )
             ouvinte.comecar()
@@ -706,7 +711,7 @@ private fun AvisoComBotao(aviso: String, botao: String, fundoClaro: Boolean = fa
 }
 
 /** Com o celular bloqueado, pede o desbloqueio (PIN, digital) antes de [depois]; a tela do alarme continua por cima. */
-private fun desbloquear(activity: Activity?, depois: () -> Unit) {
+fun desbloquear(activity: Activity?, depois: () -> Unit) {
     val bloqueio = activity?.getSystemService(KeyguardManager::class.java)
     if (activity == null || bloqueio?.isKeyguardLocked != true) return depois()
     bloqueio.requestDismissKeyguard(

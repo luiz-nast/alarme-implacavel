@@ -128,10 +128,8 @@ private fun TelaAlarme(alarme: Alarme) {
     val verificacao by AlarmeService.verificacao.collectAsStateWithLifecycle()
     val conversa by AlarmeService.conversa.collectAsStateWithLifecycle()
     val caminhada by AlarmeService.caminhada.collectAsStateWithLifecycle()
-    // A meta da câmera vem do serviço: a de sempre (metaOlhar) ou, no despertador com conversa e caminhada, a do lugar da caminhada
-    val metaCamera by AlarmeService.metaCamera.collectAsStateWithLifecycle()
+    val metaCamera = metaOlhar(alarme)
     val comemorando by AlarmeService.comemorando.collectAsStateWithLifecycle()
-    val comConversa by AlarmeService.comConversa.collectAsStateWithLifecycle()
     val desbloqueado = celularDesbloqueado()
     val agora = agoraACada(1_000)
 
@@ -174,8 +172,7 @@ private fun TelaAlarme(alarme: Alarme) {
             // Logo depois de o celular reiniciar, a voz do Google só roda depois do primeiro desbloqueio
             !desbloqueado -> pagina { EtapaDesbloquear() }
             !silenciado -> pagina { EtapaFalar(metaCamera, onStop = { AlarmeService.silenciar(ctx) }) }
-            // Sem a IA (ou com ela bloqueada), o despertador com conversa e caminhada é a missão de sempre, com a mesma tela
-            saudando -> pagina { EtapaSaudacao(agora.hour, comConversa = comConversa) }
+            saudando -> pagina { EtapaSaudacao(agora.hour, caminhada = alarme.missao && alarme.caminhada) }
             verificacao != null -> verificacao?.let { passo -> pagina { EtapaVerificacao(passo) } }
             conversa != null -> conversa?.let { c -> pagina { EtapaConversa(c) } }
             caminhada != null -> caminhada?.let { c ->
@@ -188,7 +185,7 @@ private fun TelaAlarme(alarme: Alarme) {
                         prazoAte = c.prazoAte,
                         ultimoPasso = ultimoPasso,
                         onAndando = { AlarmeService.andando(ctx, it) },
-                        onSemGps = { AlarmeService.semGps(ctx) },
+                        onDefeito = { AlarmeService.missaoCumprida(ctx, comemorar = false) },
                         onConcluiu = { AlarmeService.missaoCumprida(ctx) },
                     )
                 }

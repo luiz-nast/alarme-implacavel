@@ -121,16 +121,22 @@ fun CartaoPoderes(poderes: Map<Poder, Boolean>, onLiberar: (Poder) -> Unit) {
 }
 
 /**
- * Os botões de teste (tocam em 10 s), recolhidos: o alarme de sempre e o despertador com conversa e caminhada,
- * e se a IA do celular está pronta ([iaPronta]: o modelo copiado pro celular e memória livre).
+ * Os botões de teste (tocam em 10 s, com cada etapa bem mais curta), recolhidos: os dois despertadores, "câmera +
+ * frases" e "conversa + caminhada", e se a IA do celular está pronta ([iaPronta]: o modelo copiado pro celular e
+ * memória livre).
  */
 @Composable
 fun SecaoTestes(iaPronta: Boolean, onTestar: () -> Unit, onTestarCaminhada: () -> Unit) {
     SecaoRecolhivel("Testes", "Tocam em 10 s, pra conferir o alarme", alerta = false) {
-        OutlinedButton(onClick = onTestar, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Testar o alarme de sempre") }
-        OutlinedButton(onClick = onTestarCaminhada, modifier = Modifier.fillMaxWidth()) { Text("Testar conversa e caminhada") }
+        OutlinedButton(onClick = onTestar, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Testar câmera + frases") }
+        OutlinedButton(onClick = onTestarCaminhada, modifier = Modifier.fillMaxWidth()) { Text("Testar conversa + caminhada") }
         Text(
-            if (iaPronta) "IA do celular pronta (Gemma 4 E2B, sem internet)" else "IA do celular sem o modelo: o teste com conversa vira o alarme de sempre",
+            "Câmera + frases: 30 s de câmera, com as frases no meio. Conversa + caminhada: 4 min de conversa e 1 min andando.",
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        Text(
+            if (iaPronta) "IA do celular pronta (Gemma 4 E2B, sem internet)" else "IA do celular sem o modelo: o teste vai direto pra caminhada",
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(top = 4.dp),
         )
@@ -171,8 +177,8 @@ fun CartaoAlarme(alarme: Alarme, agora: ZonedDateTime, onLigar: (Boolean) -> Uni
                 Text(
                     when {
                         alarme.remedio -> "lembrete: toque suave"
-                        alarme.caminhada -> "conversa e caminhada: STOP, IA e 18 min andando"
-                        else -> "atividade: STOP + 40 min de câmera"
+                        alarme.caminhada -> "conversa + caminhada: 10 min de IA e 16 min andando"
+                        else -> "câmera + frases: 40 min de câmera"
                     },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,

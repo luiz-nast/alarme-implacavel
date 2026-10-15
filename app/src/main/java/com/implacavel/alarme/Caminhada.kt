@@ -1,25 +1,24 @@
-// Tela da caminhada da manhã (despertador com conversa e caminhada), mostrada pela AlarmeActivity depois
-// da conversa: o prazo pra sair de casa e a caminhada contada pelo GPS, num anel. As regras e os tempos
-// ficam em RegrasCaminhada.kt; a vigia (bipes de parado, câmera no lugar do GPS que não funciona), no AlarmeService.
+// Tela da caminhada da manhã (despertador "conversa + caminhada"), mostrada pela AlarmeActivity depois da
+// conversa: o prazo pra sair de casa e a caminhada contada pelo GPS, num anel. Sem plano B: dentro de casa, sem
+// sinal, com a localização desligada ou sem a permissão dela, o tempo não anda e os bipes não param. As regras e os
+// tempos ficam em RegrasCaminhada.kt; a vigia (bipes de parado), no AlarmeService.
 package com.implacavel.alarme
 
 import android.annotation.SuppressLint
-import android.app.Activity
-import android.app.KeyguardManager
 import android.content.Context
 import android.content.Intent
-import android.location.GnssStatus
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import androidx.activity.compose.LocalActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
@@ -53,7 +52,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
-/** O GPS manda um fixo por segundo, mesmo parado. */
+/** O GPS manda um fixo por segundo, mesmo parado: o mais rápido que o GPS do celular dá. */
 private const val INTERVALO_GPS_MS = 1_000L
 
 /** De quanto em quanto tempo a etapa confere o relógio: contagens, fixo velho e o aviso pro serviço. */
@@ -82,11 +81,9 @@ private data class LeituraGps(val movimento: Movimento, val velocidade: Float?, 
  * tela mostra a contagem pro bipe a partir do último sinal recebido pelo serviço ([ultimoPasso],
  * [segundosProBipe]); os bipes são da vigia de lá.
  *
- * [onSemGps] uma vez, pra câmera ficar no lugar: o GPS não funciona ([gpsComDefeito]: sem ouvir satélite nenhum
- * por [SEM_GPS_MS], ou ouvindo, mas sem fixo nenhum por [SEM_FIXO_MAX_MS]), contando depois do prazo pra sair (no
- * prazo a pessoa ainda pode estar em casa, onde o GPS muitas vezes não pega) e com a localização ligada (desligar
- * é escolha, não defeito); ou o celular não tem GPS, ou a permissão da localização foi tirada. Dentro de casa o GPS
- * ainda ouve satélites fracos, com fixo impreciso ou sem fixo: não é defeito, tem que ir pra rua.
+ * Funciona sem internet: é o GPS puro, ouvindo os satélites. Sem sinal (dentro de casa), com a localização desligada
+ * (botão pra ligar) ou sem a permissão dela (botão pra liberar), não conta: tem que ir pra rua. [onDefeito] só num
+ * celular sem GPS nenhum, pra um defeito não prender ninguém (como a câmera que não abre).
  * [onConcluiu] uma vez, com o anel completo.
  */
 @Composable
@@ -96,27 +93,30 @@ fun EtapaCaminhada(
     prazoAte: Long,
     ultimoPasso: Long,
     onAndando: (andadoMs: Long) -> Unit,
-    onSemGps: () -> Unit,
+    onDefeito: () -> Unit,
     onConcluiu: () -> Unit,
 ) {
     val ctx = LocalContext.current
     val activity = LocalActivity.current
     val avisarAndando by rememberUpdatedState(onAndando)
-    val avisarSemGps by rememberUpdatedState(onSemGps)
+    val avisarDefeito by rememberUpdatedState(onDefeito)
     val concluir by rememberUpdatedState(onConcluiu)
     // A meta pode subir no meio: alarme de verdade disparando durante o teste (EmAndamento.juntar)
     val meta by rememberUpdatedState(metaMs)
-    val fimDoPrazo by rememberUpdatedState(prazoAte)
     // Continua do que o serviço guardou; parado, o tempo andado fica onde está e nunca desce
     var andadoMs by remember { mutableLongStateOf(andadoInicialMs) }
     var leitura by remember { mutableStateOf<LeituraGps?>(null) }
     var anterior by remember { mutableStateOf<Fixo?>(null) } // o último fixo válido: o passo é medido a partir dele
     var ligada by remember { mutableStateOf(gpsLigado(ctx)) }
+    var permitida by remember { mutableStateOf(Poder.LOCALIZACAO.liberado(ctx)) }
     var agora by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
-    var semFixoDesde by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) } // o último fixo, ou o fim do prazo pra sair
-    var surdoDesde by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) } // o último fixo ou satélite ouvido, ou o fim do prazo
 
-    DisposableEffect(Unit) {
+    // Com a permissão (de novo, se ela foi tirada e liberada no meio), o GPS começa a ouvir
+    DisposableEffect(permitida) {
+        if (!permitida) {
+            Log.w(TAG, "Caminhada: sem permissão de localização, o tempo não anda")
+            return@DisposableEffect onDispose {}
+        }
         val gps = ctx.getSystemService(LocationManager::class.java)
         val ouvinte = object : LocationListener {
             override fun onLocationChanged(local: Location) {
@@ -125,8 +125,6 @@ fun EtapaCaminhada(
                 leitura = LeituraGps(movimento(anterior, atual), velocidade(anterior, atual), atual.precisaoM, chegou)
                 andadoMs += passoDeCaminhada(anterior, atual)
                 if (fixoValido(atual)) anterior = atual
-                semFixoDesde = chegou
-                surdoDesde = chegou
             }
 
             // Antes do Android 11 estes três não têm corpo pronto: sem eles, o app cai quando a localização liga ou desliga
@@ -137,53 +135,30 @@ fun EtapaCaminhada(
             @Deprecated("Chamado só antes do Android 10")
             override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
         }
-        // O GPS ouvindo satélites, mesmo sem fixo (dentro de casa), funciona: não é defeito, tem que ir pra rua
-        val satelites = object : GnssStatus.Callback() {
-            override fun onSatelliteStatusChanged(status: GnssStatus) {
-                if ((0 until status.satelliteCount).any { status.getCn0DbHz(it) > 0f }) surdoDesde = SystemClock.elapsedRealtime()
-            }
-        }
         try {
-            ouvirGps(gps, ouvinte, satelites)
+            ouvirGps(gps, ouvinte)
             Log.i(TAG, "Caminhada: GPS ligado, ${andadoMs / 1000} s já andados de ${meta / 1000}")
         } catch (e: SecurityException) {
-            // Permissão tirada depois de o serviço escolher a caminhada: sem como ouvir o GPS, como no defeito
-            Log.w(TAG, "Caminhada: sem permissão de localização, a câmera fica no lugar", e)
-            avisarSemGps()
+            // Permissão tirada entre a conferência e o pedido: o laço abaixo relê e mostra o botão
+            Log.w(TAG, "Caminhada: sem permissão de localização", e)
+            permitida = false
         } catch (e: IllegalArgumentException) {
-            Log.w(TAG, "Caminhada: o celular não tem GPS, a câmera fica no lugar", e)
-            avisarSemGps()
+            Log.w(TAG, "Caminhada: o celular não tem GPS, defeito: o alarme desliga", e)
+            avisarDefeito()
         }
-        onDispose {
-            gps.removeUpdates(ouvinte)
-            gps.unregisterGnssStatusCallback(satelites)
-        }
+        onDispose { gps.removeUpdates(ouvinte) }
     }
 
     LaunchedEffect(Unit) {
         var ultimoAviso = 0L
         var andavaAntes = false
-        var avisouSemGps = false
         while (true) {
             delay(CONFERIR_MS)
             agora = SystemClock.elapsedRealtime()
             val ligadaAgora = gpsLigado(ctx)
             if (ligadaAgora != ligada) Log.i(TAG, "Caminhada: localização ${if (ligadaAgora) "ligada" else "desligada"}")
             ligada = ligadaAgora
-            // Sem fixo no prazo pra sair (ainda em casa) ou com a localização desligada (o botão liga de novo) não é defeito
-            if (!ligada || agora < fimDoPrazo) {
-                semFixoDesde = agora
-                surdoDesde = agora
-            }
-            if (!avisouSemGps && gpsComDefeito(surdoMs = agora - surdoDesde, semFixoMs = agora - semFixoDesde)) {
-                avisouSemGps = true
-                Log.w(
-                    TAG,
-                    "Caminhada: GPS sem funcionar (${(agora - surdoDesde) / 1000} s sem ouvir satélite, ${(agora - semFixoDesde) / 1000} s sem fixo), " +
-                        "a câmera fica no lugar (${andadoMs / 1000} s andados)",
-                )
-                avisarSemGps()
-            }
+            permitida = Poder.LOCALIZACAO.liberado(ctx) // liberada nas Configurações, ou tirada no meio
             val andando = recente(leitura, agora)?.movimento == Movimento.ANDANDO
             if (andando != andavaAntes) Log.i(TAG, "Caminhada: ${retorno(recente(leitura, agora)).second}, ${andadoMs / 1000} s de ${meta / 1000}")
             // A cada segundo andando, e no instante em que parou: a contagem pro bipe começa daí
@@ -201,7 +176,11 @@ fun EtapaCaminhada(
     }
 
     val andando = recente(leitura, agora)?.movimento == Movimento.ANDANDO
-    val (corAlvo, status) = if (ligada) retorno(recente(leitura, agora)) else VermelhoParado to "Ligue a localização"
+    val (corAlvo, status) = when {
+        !permitida -> VermelhoParado to "A localização está sem permissão"
+        !ligada -> VermelhoParado to "Ligue a localização"
+        else -> retorno(recente(leitura, agora))
+    }
     val cor by animateColorAsState(corAlvo, label = "cor da caminhada")
     val noPrazo = avisoDoPrazo(agora, prazoAte)
     val bipeEm = if (andando) null else segundosProBipe(agora, ultimoPasso, prazoAte)
@@ -222,9 +201,12 @@ fun EtapaCaminhada(
             val aviso = bipeEm?.let { if (it > 0) "Bipe em $it s" else "🔊 Anda que o bipe para" }.orEmpty()
             Text(aviso, color = VermelhoParado, fontSize = 28.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
         }
-        if (!ligada) {
+        if (!permitida) {
             Spacer(Modifier.height(12.dp))
-            BotaoGrande("LIGAR LOCALIZAÇÃO", { abrirLocalizacao(ctx, activity) }, fundoClaro = true)
+            PedirLocalizacao()
+        } else if (!ligada) {
+            Spacer(Modifier.height(12.dp))
+            BotaoGrande("LIGAR LOCALIZAÇÃO", { desbloquear(activity) { abrirLocalizacao(ctx) } }, fundoClaro = true)
         }
         Spacer(Modifier.height(8.dp))
         Text("Só conta andando a pé, na rua", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 15.sp)
@@ -270,34 +252,39 @@ private fun fixoDe(local: Location) = Fixo(
 private fun localizacaoFalsa(local: Location): Boolean = if (Build.VERSION.SDK_INT >= 31) local.isMock else local.isFromMockProvider
 
 /**
- * Pede ao GPS um fixo por segundo, mesmo parado (distância mínima 0), e os [satelites] que ele ouve, os dois
- * entregues no fio principal. Sem a permissão, lança SecurityException; celular sem GPS, IllegalArgumentException.
+ * Pede ao GPS um fixo por segundo, mesmo parado (distância mínima 0), entregue no fio principal. Sem a permissão,
+ * lança SecurityException; celular sem GPS, IllegalArgumentException.
  */
 @SuppressLint("MissingPermission") // quem chama trata a falta da permissão
-private fun ouvirGps(gps: LocationManager, ouvinte: LocationListener, satelites: GnssStatus.Callback) {
+private fun ouvirGps(gps: LocationManager, ouvinte: LocationListener) {
     gps.requestLocationUpdates(LocationManager.GPS_PROVIDER, INTERVALO_GPS_MS, 0f, ouvinte, Looper.getMainLooper())
-    gps.registerGnssStatusCallback(satelites, Handler(Looper.getMainLooper()))
 }
 
 /**
- * Abre a localização nas Configurações, numa tarefa separada (como [Poder.abrirConfiguracao]), com um
- * tempo sem a tela do alarme voltar por cima; com o celular bloqueado, pede o desbloqueio antes.
+ * Localização sem permissão: desbloqueia o celular, se preciso, e pede no diálogo do sistema (como a câmera, em
+ * PedirCamera). Se o Android não mostrar mais o diálogo (negado de vez), abre as Configurações do app, com um tempo
+ * sem a tela do alarme voltar por cima. A tela relê a permissão a cada conferência.
  */
-private fun abrirLocalizacao(ctx: Context, activity: Activity?) {
-    AlarmeService.darTempo(ctx)
-    fun abrir() {
-        runCatching { ctx.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-            .onFailure { Log.w(TAG, "Caminhada: não abriu as Configurações da localização", it) }
+@Composable
+private fun PedirLocalizacao() {
+    val ctx = LocalContext.current
+    val activity = LocalActivity.current
+    val pedir = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        if (!Poder.LOCALIZACAO.liberado(ctx)) {
+            AlarmeService.darTempo(ctx)
+            Poder.LOCALIZACAO.abrirConfiguracao(ctx)
+        }
     }
-    val bloqueio = activity?.getSystemService(KeyguardManager::class.java)
-    if (activity == null || bloqueio?.isKeyguardLocked != true) return abrir()
-    bloqueio.requestDismissKeyguard(
-        activity,
-        object : KeyguardManager.KeyguardDismissCallback() {
-            override fun onDismissSucceeded() = abrir()
-        },
-    )
+    BotaoGrande("LIBERAR LOCALIZAÇÃO", { desbloquear(activity) { pedir.launch(Poder.LOCALIZACAO.pedido) } }, fundoClaro = true)
 }
+
+/** Abre a localização nas Configurações, numa tarefa separada (como [Poder.abrirConfiguracao]), com um tempo sem a tela do alarme voltar por cima. */
+private fun abrirLocalizacao(ctx: Context) {
+    AlarmeService.darTempo(ctx)
+    runCatching { ctx.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        .onFailure { Log.w(TAG, "Caminhada: não abriu as Configurações da localização", it) }
+}
+
 
 /** Trilha fraca do anel inteiro + arco forte com o tempo andado, começando no topo (como o anel da câmera). */
 @Composable

@@ -39,6 +39,7 @@ class Sirene(private val ctx: Context) {
     private var volumeDoFalante = 0 // o da voz ou o dos avisos, conforme o que o [falante] toca
     private var vibrador: Vibrator? = null
     private var foco: AudioFocusRequest? = null
+    private var focoEmprestado = false // outro app pegou o foco do áudio por um tempo (a voz do Google, gravando uma fala)
     private var musica: String? = null
     private var foto: EmAndamento? = null
     private var fator = 1f // volume da música relativo ao de alarme ([volume])
@@ -68,7 +69,7 @@ class Sirene(private val ctx: Context) {
         if (audio.getStreamVolume(AudioManager.STREAM_ALARM) < volume) runCatching { audio.setStreamVolume(AudioManager.STREAM_ALARM, volume, 0) }
     }
 
-    /** Os sons de aviso saem sempre no volume do fim da subida (40%), mesmo com ela no começo; a voz, um pouco abaixo (30%). */
+    /** Os sons de aviso saem sempre no volume do fim da subida (40%), mesmo com ela no começo; a voz, um pouco acima (45%). */
     private fun volumeDosAvisos() = foto?.volumeDosAvisos(audio.getStreamMaxVolume(AudioManager.STREAM_ALARM)) ?: 0
     private fun volumeDaVoz() = foto?.volumeDaVoz(audio.getStreamMaxVolume(AudioManager.STREAM_ALARM)) ?: 0
 
@@ -109,9 +110,10 @@ class Sirene(private val ctx: Context) {
         // Pedido de novo a cada vez: se outro app tomou o foco no meio, ele pausa de novo
         val pedido = foco ?: AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
             .setAudioAttributes(ATRIBUTOS)
+            .setOnAudioFocusChangeListener({ mudanca -> focoEmprestado = mudanca == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT }, handler)
             .build()
             .also { foco = it }
-        audio.requestAudioFocus(pedido)
+        if (audio.requestAudioFocus(pedido) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) focoEmprestado = false
         tocarSom()
         vibrar()
     }
@@ -183,6 +185,7 @@ class Sirene(private val ctx: Context) {
         falante?.release()
         volumeDoFalante = volume
         runCatching { audio.setStreamVolume(AudioManager.STREAM_ALARM, volume, 0) }
+        retomarFoco()
         falante = tocarArquivo(uri, emLoop = false)?.apply {
             setOnCompletionListener {
                 it.release()
@@ -193,12 +196,27 @@ class Sirene(private val ctx: Context) {
         if (falante == null) aoTerminar()
     }
 
+    /**
+     * A voz do Google pega o foco do áudio enquanto grava cada fala nova (até gravando em arquivo, sem tocar nada).
+     * Som do app que começa nessa hora o Android deixa quase mudo e, quando o foco volta, sobe aos poucos: a fala da
+     * IA e o bom dia começavam baixinho. Antes de tocar, o foco volta pra cá. Só o emprestado por um tempo: o que o
+     * YouTube da câmera tomou de vez fica com ele (senão o vídeo pausaria a cada aviso), e numa ligação o Android não dá.
+     */
+    private fun retomarFoco() {
+        val pedido = foco ?: return
+        if (!focoEmprestado) return
+        val ok = audio.requestAudioFocus(pedido) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        if (ok) focoEmprestado = false
+        Log.i(TAG, "Sirene: foco do áudio ${if (ok) "de volta" else "negado"} antes de tocar")
+    }
+
     /** Fim: cala, solta a trava e as outras mídias e, com [volumeAntes], devolve o volume de alarme de antes. */
     fun desligar(volumeAntes: Int? = null) {
         handler.removeCallbacks(travarVolume)
         calar()
         foco?.let { audio.abandonAudioFocusRequest(it) }
         foco = null
+        focoEmprestado = false
         volumeAntes?.let { runCatching { audio.setStreamVolume(AudioManager.STREAM_ALARM, it, 0) } }
     }
 

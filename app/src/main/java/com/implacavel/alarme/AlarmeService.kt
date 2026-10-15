@@ -49,14 +49,13 @@ import java.time.LocalTime
  * - se o app caiu [LIMITE_QUEDAS] vezes neste alarme, é defeito, não truque: ele volta com o
  *   DESLIGAR, pra um defeito não prender ninguém num alarme que nunca desliga. Numa queda só,
  *   o desafio continua valendo;
- * - no despertador com conversa e caminhada ([Alarme.caminhada]), depois do bom dia vêm a conversa com a
- *   IA ([MotorDaConversa], no celular) e a caminhada pelo GPS (com chuva, ou sem internet pra saber, a câmera no
- *   lugar; sem a IA, a missão de sempre).
- *   Quem decide tudo são os relógios daqui: a IA só produz o texto das falas.
+ * - no despertador "conversa + caminhada" ([Alarme.caminhada]), depois do bom dia vêm a conversa com a IA
+ *   ([MotorDaConversa], no celular) e a caminhada pelo GPS, chova ou faça sol, com ou sem internet (sem a IA,
+ *   direto pra caminhada). Quem decide tudo são os relógios daqui: a IA só produz o texto das falas.
  *
  * Comandos pela action do Intent, cada um com uma função no companion: tocar, missão cumprida,
- * desligar, tela, silenciar, olhando, volume, dar tempo, ouviu, repetiu, sem voz, respondeu, andando
- * e sem GPS. O comando reexibir vem da notificação arrastada pro lado.
+ * desligar, tela, silenciar, olhando, volume, dar tempo, ouviu, repetiu, sem voz, respondeu e andando.
+ * O comando reexibir vem da notificação arrastada pro lado.
  */
 /** Um passo da verificação do meio: a [frase] da vez ([numero] de 5; vazia na fala de abertura e no agradecimento) e se é a [suaVez] de repetir. */
 data class Verificacao(val frase: String, val numero: Int, val suaVez: Boolean)
@@ -79,8 +78,8 @@ data class Conversa(
 /** A caminhada da manhã: o tempo já [andadoMs] (guardado pelo serviço), a meta e o fim do prazo pra sair de casa ([prazoAte], SystemClock.elapsedRealtime). */
 data class Caminhada(val andadoMs: Long, val metaMs: Long, val prazoAte: Long)
 
-/** As etapas do despertador com conversa e caminhada, depois do STOP e do bom dia. */
-private enum class EtapaDaManha { CONVERSA, CAMINHADA, CAMERA }
+/** As etapas do despertador "conversa + caminhada", depois do STOP e do bom dia. */
+private enum class EtapaDaManha { CONVERSA, CAMINHADA }
 
 /** Um pedido pra IA: chama o motor com o [aoResponder] (que recebe a fala ou null). Guardado pra pedir de novo numa falha. */
 private typealias PedidoDaIa = (aoResponder: (String?) -> Unit) -> Unit
@@ -102,7 +101,6 @@ class AlarmeService : Service() {
         private const val ACAO_SEM_VOZ = "sem_voz"
         private const val ACAO_RESPONDEU = "respondeu"
         private const val ACAO_ANDANDO = "andando"
-        private const val ACAO_SEM_GPS = "sem_gps"
         private const val EXTRA_VOLUME = "volume"
         private const val EXTRA_ABERTA = "aberta"
         private const val EXTRA_OLHADO = "olhado"
@@ -137,8 +135,8 @@ class AlarmeService : Service() {
         private const val SAUDACAO_MAX_MS = 20_000L
 
         /**
-         * Despertador com conversa e caminhada: depois do bom dia, o máximo de espera pela abertura da IA (as
-         * notícias vêm antes dela) e pelo clima. Sem a abertura até lá, a missão de sempre.
+         * Despertador "conversa + caminhada": depois do bom dia, o máximo de espera pela abertura da IA (as notícias
+         * vêm antes dela). Sem a abertura até lá, direto pra caminhada.
          */
         private const val PREPARO_MAX_MS = 20_000L
 
@@ -153,12 +151,11 @@ class AlarmeService : Service() {
         private val FALAS_FIXAS = mapOf(FALA_DO_INICIO to FALA_INICIO, FALA_DO_FIM to FALA_FIM, FALA_DE_VERIFICAR to FALA_VERIFICAR, FALA_DA_METADE to FALA_METADE) +
             (1 until (META_OLHAR_MS / MARCO_MS).toInt()).associate { "minutos_${it * 10}" to falaDosMinutos(it * 10) }
 
-        /** As falas fixas da conversa: gravadas só no despertador com conversa e caminhada (o de sempre fica igual). */
+        /** As falas fixas da conversa e da caminhada: gravadas só no despertador "conversa + caminhada" (o outro fica igual). */
         private const val FALA_DE_CONTINUAR = "continuar"
         private const val FALA_DE_SAIR = "sair"
-        private const val FALA_DE_CAMERA = "camera"
         private const val FALA_DE_NAO_NEGOCIAR = "nao_negocia"
-        private val FALAS_DA_CONVERSA = mapOf(FALA_DE_CONTINUAR to FALA_CONTINUAR, FALA_DE_SAIR to FALA_SAIR, FALA_DE_CAMERA to FALA_CAMERA, FALA_DE_NAO_NEGOCIAR to FALA_NAO_NEGOCIA)
+        private val FALAS_DA_CONVERSA = mapOf(FALA_DE_CONTINUAR to FALA_CONTINUAR, FALA_DE_SAIR to FALA_SAIR, FALA_DE_NAO_NEGOCIAR to FALA_NAO_NEGOCIA)
 
         private val _tocando = MutableStateFlow<Alarme?>(null)
 
@@ -169,11 +166,6 @@ class AlarmeService : Service() {
 
         /** true = a pessoa já disse "stop" e a música está calada: a tela do alarme mostra a etapa da câmera. */
         val silenciado: StateFlow<Boolean> = _silenciado.asStateFlow()
-
-        private val _comConversa = MutableStateFlow(false)
-
-        /** Esta manhã vai ter a conversa com a IA (até decidir o caminho, a tela do bom dia diz "Preparando a manhã…"). */
-        val comConversa: StateFlow<Boolean> = _comConversa.asStateFlow()
 
         private val _saudando = MutableStateFlow(false)
 
@@ -216,14 +208,6 @@ class AlarmeService : Service() {
          * volta, mas o anel fica: depois do "stop", a câmera continua daqui, e a tela recriada no meio também.
          */
         val olhado: StateFlow<Long> = _olhado.asStateFlow()
-
-        private val _metaCamera = MutableStateFlow(META_OLHAR_MS)
-
-        /**
-         * Quanto tempo de olhos abertos a etapa da câmera pede agora: o [metaOlhar] do alarme ou, no despertador
-         * com conversa e caminhada, o tempo da câmera no lugar da caminhada. Fica pronto antes de [tocando].
-         */
-        val metaCamera: StateFlow<Long> = _metaCamera.asStateFlow()
 
         private val _conversa = MutableStateFlow<Conversa?>(null)
 
@@ -302,9 +286,6 @@ class AlarmeService : Service() {
          */
         fun andando(ctx: Context, andadoMs: Long) { ctx.startService(comando(ctx, ACAO_ANDANDO).putExtra(EXTRA_ANDADO, andadoMs)) }
 
-        /** Na caminhada, o GPS não funciona (nenhum fixo, sem permissão ou sem GPS): a câmera fica no lugar do resto. */
-        fun semGps(ctx: Context) { ctx.startService(comando(ctx, ACAO_SEM_GPS)) }
-
         private fun comando(ctx: Context, acao: String) = Intent(ctx, AlarmeService::class.java).setAction(acao)
     }
 
@@ -324,7 +305,7 @@ class AlarmeService : Service() {
     private var volumeAoFim: Int? = null // o volume de antes do alarme cumprido, devolvido ao fechar
     private val handler = Handler(Looper.getMainLooper())
 
-    // Despertador com conversa e caminhada ([manhaNova]). O caminho, a etapa e o progresso ficam quando a música
+    // Despertador "conversa + caminhada" ([manhaNova]). O caminho, a etapa e o progresso ficam quando a música
     // volta, como o anel da câmera; só um alarme novo começa do zero ([esquecerManha])
     private var caminho: CaminhoDaManha? = null // decidido depois do primeiro bom dia
     private var etapa: EtapaDaManha? = null
@@ -332,10 +313,8 @@ class AlarmeService : Service() {
     private var iaBloqueada = false // o app já caiu neste alarme: a IA do celular (que pesa) fica de fora
     private var abertura: String? = null // a primeira fala da IA (null = não veio)
     private var aberturaChegou = false
-    private var chuva: Boolean? = null // null = não deu pra saber (sem internet, sem localização): sem caminhada
-    private var climaChegou = false
     private var saudacaoTerminou = false // o bom dia deste STOP já acabou
-    private var rodadaConversa = 0 // muda ao pausar ou acabar: notícias, clima, IA e voz atrasados não avançam a manhã
+    private var rodadaConversa = 0 // muda ao pausar ou acabar: notícias, IA e voz atrasados não avançam a manhã
     private var conversadoMs = 0L // tempo de conversa pura
     private var extras = 0 // vezes que a pessoa quis conversar mais (só uma)
     private var falhas = 0 // vezes seguidas sem resposta da IA
@@ -346,6 +325,7 @@ class AlarmeService : Service() {
     private var iaFalando = false // a voz da IA está tocando: o relógio da conversa anda
     private var vezDaConversa = 0L // SystemClock.elapsedRealtime em que começou a vez da pessoa
     private var ouvidoEm = 0L // a última fala ouvida na vez da pessoa
+    private var falaJunta = "" // as frases terminadas desta vez da pessoa, esperando ela parar de falar ([fimDaFala])
     private var bipesDaConversa = 0 // do silêncio, desde a última fala
     private var vezes = 0 // vezes da pessoa ([Conversa.vez])
     private var falasDaIa = 0 // cada fala da IA grava num arquivo seu
@@ -353,7 +333,6 @@ class AlarmeService : Service() {
     private var andado = 0L // tempo andando na caminhada
     private var prazoAte = 0L // fim do prazo pra sair de casa (SystemClock.elapsedRealtime; 0 = ainda não começou)
     private var bipesParado = 0 // da vigia da caminhada, desde o último sinal de "andando"
-    private var cameraNoLugarDaCaminhada = false // a câmera desta manhã é a da chuva ou a do GPS sem funcionar
 
     /**
      * Enquanto toca: empurra a retomada pra frente (se o app morrer, ela dispara e o alarme volta) e
@@ -428,11 +407,11 @@ class AlarmeService : Service() {
     }
 
     /**
-     * As falas fixas mais as 5 frases de hoje da verificação; no despertador com conversa e caminhada, com a IA do
-     * celular pronta, também as da conversa. Se um desses juntar depois, as falas dela não estão gravadas: vão só na tela.
+     * As falas fixas mais as 5 frases de hoje da verificação; no despertador "conversa + caminhada", também as da
+     * conversa e da caminhada. Se um desses juntar depois, as falas dela não estão gravadas: vão só na tela.
      */
     private fun falasFixas() = FALAS_FIXAS +
-        (if (Ajustes.emAndamento?.alarme?.let(::comConversaECaminhada) == true && MotorDaConversa.disponivel(this)) FALAS_DA_CONVERSA else emptyMap()) +
+        (if (Ajustes.emAndamento?.alarme?.let(::comConversaECaminhada) == true) FALAS_DA_CONVERSA else emptyMap()) +
         frasesDeHoje.mapIndexed { i, frase -> "frase_$i" to frase }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -473,7 +452,6 @@ class AlarmeService : Service() {
             }
             acao == ACAO_RESPONDEU -> respondeuNaConversa(intent.getStringExtra(EXTRA_TEXTO).orEmpty())
             acao == ACAO_ANDANDO -> andou(intent.getLongExtra(EXTRA_ANDADO, 0L))
-            acao == ACAO_SEM_GPS -> semGpsNaCaminhada()
         }
         return START_NOT_STICKY
     }
@@ -488,7 +466,7 @@ class AlarmeService : Service() {
         if (cumprido) Ajustes.volumeParaDevolver = null
         esperaDesbloqueio?.let { unregisterReceiver(it) }
         voz?.desligar()
-        rodadaConversa++ // notícias, clima e IA atrasados não chegam em ninguém
+        rodadaConversa++ // notícias e IA atrasadas não chegam em ninguém
         motor?.desligar()
         MotorDaConversa.liberar()
         _silenciado.value = false
@@ -500,8 +478,6 @@ class AlarmeService : Service() {
         _conversa.value = null
         _caminhada.value = null
         _tocando.value = null
-        _comConversa.value = false
-        _metaCamera.value = META_OLHAR_MS
         if (processador.isHeld) processador.release()
         super.onDestroy()
     }
@@ -524,9 +500,8 @@ class AlarmeService : Service() {
         val quedas = quedasDesde(em.desde)
         val alarme = if (quedas >= LIMITE_QUEDAS) em.alarme.copy(missao = false) else em.alarme
         val jaTocava = _tocando.value != null
-        // Alarme novo: nada da conversa e caminhada de antes. A meta da câmera fica pronta antes de a tela abrir
+        // Alarme novo: nada da conversa e da caminhada de antes
         if (!jaTocava) esquecerManha()
-        _metaCamera.value = metaDaCamera(alarme)
         _tocando.value = alarme
         mostrarNotificacao(alarme)
         sirene.preparar(em, comeco = !jaTocava)
@@ -535,12 +510,12 @@ class AlarmeService : Service() {
         if (jaTocava) {
             ajustarManha(alarme)
             if (caminho == null) prepararIa(alarme, em)
-            if (!cameraNoLugarDaCaminhada && _olhado.value < metaOlhar(alarme) / 2) _metadeVerificada.value = false
+            if (_olhado.value < metaOlhar(alarme) / 2) _metadeVerificada.value = false
             return
         }
         Log.i(TAG, "Serviço: tocando \"${alarme.nome}\" (missão=${alarme.missao}, remédio=${alarme.remedio}, caminhada=${alarme.caminhada}, quedas=$quedas)")
         // O modelo começa a carregar já, com a música, pra estar pronto no fim do bom dia. Se o app já saiu sozinho
-        // neste alarme (queda, travamento ou falta de memória), pode ter sido ele: a manhã fica sendo a de sempre
+        // neste alarme (queda, travamento ou falta de memória), pode ter sido ele: a manhã vai sem a conversa
         iaBloqueada = saiuSozinhoDesde(em.desde) || Ajustes.iaTentadaEm == em.desde
         prepararIa(alarme, em)
         telaAberta = true
@@ -555,7 +530,7 @@ class AlarmeService : Service() {
     }
 
     /**
-     * Começa a carregar o modelo da IA (o despertador com conversa e caminhada, sem a IA bloqueada) e grava que
+     * Começa a carregar o modelo da IA (o despertador "conversa + caminhada", sem a IA bloqueada) e grava que
      * ela foi tentada neste alarme ([Ajustes.iaTentadaEm]). Já carregado ou carregando, não faz nada de novo.
      */
     private fun prepararIa(alarme: Alarme, em: EmAndamento) {
@@ -603,8 +578,8 @@ class AlarmeService : Service() {
     /**
      * A pessoa disse "stop": a música para e a voz dá bom dia ([textoDaSaudacao]); [PAUSA_DEPOIS_DA_SAUDACAO_MS]
      * depois que ela termina, diz [FALA_INICIO], toca o bipe positivo e aí começa a câmera e a vigia.
-     * Sem voz, só a pausa e o bipe. No despertador com conversa e caminhada, o fim do bom dia vai pra
-     * [saudacaoFeita], e enquanto a voz fala as notícias, o clima e a abertura da IA chegam ([prepararManha]).
+     * Sem voz, só a pausa e o bipe. No despertador "conversa + caminhada", o fim do bom dia vai pra
+     * [saudacaoFeita], e enquanto a voz fala chegam as notícias e a abertura da IA ([prepararManha]).
      */
     private fun silenciarMusica() {
         if (cumprido) return
@@ -612,7 +587,7 @@ class AlarmeService : Service() {
         sirene.calar()
         _silenciado.value = true
         _saudando.value = true
-        // Manhã de sempre já começada: um alarme com conversa e caminhada que juntar depois não muda o caminho
+        // Missão de 40 min já começada: um "conversa + caminhada" que juntar depois não muda o caminho
         if (manhaNova()) prepararManha() else if (caminho == null) caminho = CaminhoDaManha.ANTIGO
         handler.postDelayed(comecarAtividade, SAUDACAO_MAX_MS)
         val falar: (File?) -> Unit = { arquivo ->
@@ -621,7 +596,7 @@ class AlarmeService : Service() {
         voz?.gravar("saudacao_${++rodadas}", textoDaSaudacao(LocalTime.now()), falar) ?: falar(null)
     }
 
-    /** "Activity starting now", o bipe positivo e a câmera. No despertador com conversa e caminhada, [saudacaoFeita] no lugar. */
+    /** "Activity starting now", o bipe positivo e a câmera. No despertador "conversa + caminhada", [saudacaoFeita] no lugar. */
     private val anunciarInicio: Runnable = Runnable {
         if (!_saudando.value) return@Runnable
         if (manhaNova()) {
@@ -633,7 +608,7 @@ class AlarmeService : Service() {
         }
     }
 
-    /** Fim da saudação: a tela passa pra câmera e a vigia começa a contar. No despertador com conversa e caminhada, [saudacaoFeita] no lugar. */
+    /** Fim da saudação: a tela passa pra câmera e a vigia começa a contar. No despertador "conversa + caminhada", [saudacaoFeita] no lugar. */
     private val comecarAtividade: Runnable = Runnable {
         if (!_saudando.value) return@Runnable
         if (manhaNova()) {
@@ -656,7 +631,7 @@ class AlarmeService : Service() {
         if (!_silenciado.value || _saudando.value || _verificacao.value != null || _conversa.value != null || _caminhada.value != null || cumprido) return
         val antes = _olhado.value
         _olhado.value = maxOf(antes, olhadoMs)
-        val meta = _tocando.value?.let { metaDaCamera(it) } ?: return
+        val meta = _tocando.value?.let(::metaOlhar) ?: return
         if (!_metadeVerificada.value && _olhado.value >= meta / 2) return iniciarVerificacao()
         marcoCompletado(antes, _olhado.value, meta)?.let { minutos ->
             Log.i(TAG, "Missão: $minutos min de câmera")
@@ -665,10 +640,10 @@ class AlarmeService : Service() {
         adiarVigia()
     }
 
-    /** O anel zerou (sem olhar, ou sem responder na verificação): a verificação da metade vale de novo (a câmera no lugar da caminhada não tem). */
+    /** O anel zerou (sem olhar, ou sem responder na verificação): a verificação da metade vale de novo. */
     private fun zerarAnel() {
         _olhado.value = 0
-        _metadeVerificada.value = cameraNoLugarDaCaminhada
+        _metadeVerificada.value = false
     }
 
     /**
@@ -783,44 +758,40 @@ class AlarmeService : Service() {
     }
 
     // ---------------------------------------------------------------------------------------------------------
-    // Despertador com conversa e caminhada: depois do bom dia, a conversa com a IA (5 min de conversa pura) e a
-    // caminhada (7 min pra sair e 18 min andando), ou a câmera no lugar dela. Tudo pelos relógios daqui: a IA
-    // só produz o texto das falas e nunca encurta, pausa ou acaba nada.
+    // Despertador "conversa + caminhada": depois do bom dia, a conversa com a IA (10 min de conversa pura) e a
+    // caminhada (4 min pra sair e 16 min andando), chova ou faça sol. Tudo pelos relógios daqui: a IA só produz o
+    // texto das falas e nunca encurta, pausa ou acaba nada.
 
-    /** O [alarme] é o despertador com conversa e caminhada (só vale com missão). */
+    /** O [alarme] é o despertador "conversa + caminhada" (só vale com missão). */
     private fun comConversaECaminhada(alarme: Alarme) = alarme.missao && alarme.caminhada
 
-    /** O alarme tocando é o despertador com conversa e caminhada, e esta manhã não virou a missão de sempre. */
+    /** O alarme tocando é o despertador "conversa + caminhada", e esta manhã não virou a missão de 40 min. */
     private fun manhaNova(): Boolean = _tocando.value?.let { comConversaECaminhada(it) } == true && caminho != CaminhoDaManha.ANTIGO
 
     /**
-     * No STOP, enquanto a voz dá bom dia: na primeira vez, busca em segundo plano as notícias e as metas (e
-     * com elas a abertura da IA) e a chuva. Sem a IA ([MotorDaConversa.disponivel]), a manhã já fica sendo a missão
-     * de sempre, igual à de todo dia. Com o caminho já decidido (a música voltou no meio), não busca nada.
+     * No STOP, enquanto a voz dá bom dia: na primeira vez, busca em segundo plano as notícias e as metas (e com elas
+     * a abertura da IA). Sem a IA ([MotorDaConversa.disponivel]), não busca nada: a manhã vai direto pra caminhada.
+     * Com o caminho já decidido (a música voltou no meio), também não.
      */
     private fun prepararManha() {
         saudacaoTerminou = false
         if (caminho != null) return
+        abertura = null
+        aberturaChegou = false
+        motor?.desligar()
+        motor = null
         if (iaBloqueada || !MotorDaConversa.disponivel(this)) {
-            Log.i(TAG, "Conversa: ${if (iaBloqueada) "o app já caiu neste alarme" else "sem a IA no celular"}, a missão de sempre")
+            Log.i(TAG, "Conversa: ${if (iaBloqueada) "o app já caiu neste alarme" else "sem a IA no celular"}, direto pra caminhada")
             MotorDaConversa.liberar()
-            caminho = CaminhoDaManha.ANTIGO
-            _comConversa.value = false
+            aberturaChegou = true // sem abertura: o [decidir] escolhe só a caminhada
             return
         }
         Ajustes.emAndamento?.let { Ajustes.iaTentadaEm = it.desde }
-        _comConversa.value = true
         val rodada = rodadaConversa
-        abertura = null
-        aberturaChegou = false
-        chuva = null
-        climaChegou = false
-        motor?.desligar()
-        motor = null
         Noticias.buscar { manchetes, metas ->
             if (rodada != rodadaConversa) return@buscar
             val ia = MotorDaConversa.criar(this, instrucaoDoTreinador(manchetes, metas, LocalTime.now()), FALA_NAO_NEGOCIA).also { motor = it }
-            if (ia == null) { // o motor não abriu: sem abertura, a missão de sempre
+            if (ia == null) { // o motor não abriu: sem abertura, só a caminhada
                 aberturaChegou = true
                 return@buscar decidir()
             }
@@ -831,23 +802,11 @@ class AlarmeService : Service() {
                 decidir()
             }
         }
-        if (Clima.localizacaoPronta(this)) {
-            Clima.chovendo(this) { chove ->
-                if (rodada == rodadaConversa) {
-                    chuva = chove
-                    climaChegou = true
-                    decidir()
-                }
-            }
-        } else {
-            climaChegou = true // sem localização não há caminhada: a chuva não importa (fica null)
-        }
     }
 
     /**
-     * Fim do bom dia (e da pausa depois dele). Na primeira vez, decide o caminho assim que a abertura da IA e o
-     * clima chegarem (até [PREPARO_MAX_MS]; a tela segue no bom dia); depois de a música voltar, a manhã continua
-     * de onde estava.
+     * Fim do bom dia (e da pausa depois dele). Na primeira vez, decide o caminho assim que a abertura da IA chegar
+     * (até [PREPARO_MAX_MS]; a tela segue no bom dia); depois de a música voltar, a manhã continua de onde estava.
      */
     private fun saudacaoFeita() {
         if (saudacaoTerminou) return // o fim do bom dia e o prazo dele chegando os dois
@@ -857,56 +816,55 @@ class AlarmeService : Service() {
         decidir()
     }
 
-    /** A abertura da IA ou o clima não chegaram a tempo: decide com o que tem (sem a abertura, a missão de sempre; sem o clima, câmera no lugar da caminhada). */
+    /** A abertura da IA não chegou a tempo: a manhã vai sem a conversa, direto pra caminhada. */
     private val esperaDaDecisao = Runnable {
         if (caminho != null) return@Runnable
-        Log.w(TAG, "Conversa: a abertura da IA ou o clima não chegaram em ${PREPARO_MAX_MS / 1000} s")
+        Log.w(TAG, "Conversa: a abertura da IA não chegou em ${PREPARO_MAX_MS / 1000} s")
         rodadaConversa++ // o que chegar atrasado não vale mais
         aberturaChegou = true
-        climaChegou = true
+        abertura = null
         decidir()
     }
 
     /**
-     * Bom dia feito e respostas na mão: o caminho da manhã ([caminhoDaManha]). Sem a abertura da IA, a missão de
-     * sempre ("Activity starting now", o bipe positivo e a câmera de 40 min); com ela, a conversa, e depois a
-     * caminhada ([podeCaminhar]: localização liberada e ligada e, com certeza, sem chuva) ou a câmera.
+     * Bom dia feito e a abertura da IA na mão (ou a certeza de que ela não vem): o caminho da manhã. Com a abertura,
+     * a conversa e depois a caminhada; sem, direto pra caminhada. Um "câmera + frases" que tomou o lugar do teste
+     * (EmAndamento.juntar) vira a missão dele, de 40 min.
      */
     private fun decidir() {
         if (!saudacaoTerminou || caminho != null || !aberturaChegou) return
-        if (!climaChegou && abertura != null) return // sem a abertura é a missão de sempre: a chuva não muda nada
         val alarme = _tocando.value ?: return
         handler.removeCallbacks(esperaDaDecisao)
         val primeira = abertura
-        val rua = podeCaminhar(Clima.localizacaoPronta(this), gpsLigado(this), chuva)
-        // Um alarme sem conversa e caminhada que juntou no meio (EmAndamento.juntar) também vira a missão de sempre
-        val escolhido = if (comConversaECaminhada(alarme)) caminhoDaManha(conversaPossivel = primeira != null, caminhadaPossivel = rua) else CaminhoDaManha.ANTIGO
-        caminho = escolhido
-        Log.i(TAG, "Conversa: caminho da manhã $escolhido (abertura da IA: ${primeira != null}, rua: $rua, chuva: $chuva)")
-        if (escolhido == CaminhoDaManha.ANTIGO || primeira == null) {
-            motor?.desligar()
-            motor = null
-            MotorDaConversa.liberar()
-            _comConversa.value = false
-            // Igual ao alarme de sempre, com o mesmo prazo se a voz travar
-            handler.removeCallbacks(comecarAtividade)
-            handler.postDelayed(comecarAtividade, SAUDACAO_MAX_MS)
-            anunciarInicio.run()
-            return
+        val escolhido = when {
+            !comConversaECaminhada(alarme) -> CaminhoDaManha.ANTIGO
+            primeira != null -> CaminhoDaManha.CONVERSA_E_CAMINHADA
+            else -> CaminhoDaManha.SO_CAMINHADA
         }
-        etapa = EtapaDaManha.CONVERSA
-        continuarManha(primeira)
+        caminho = escolhido
+        Log.i(TAG, "Conversa: caminho da manhã $escolhido")
+        if (escolhido == CaminhoDaManha.CONVERSA_E_CAMINHADA && primeira != null) {
+            etapa = EtapaDaManha.CONVERSA
+            return continuarManha(primeira)
+        }
+        motor?.desligar()
+        motor = null
+        MotorDaConversa.liberar()
+        if (escolhido == CaminhoDaManha.SO_CAMINHADA) return irPraCaminhada()
+        // A missão de 40 min, com o mesmo prazo se a voz travar
+        handler.removeCallbacks(comecarAtividade)
+        handler.postDelayed(comecarAtividade, SAUDACAO_MAX_MS)
+        anunciarInicio.run()
     }
 
-    /** A etapa da manhã começa, ou volta depois do STOP e do bom dia: a conversa (com a [primeira] fala da IA, ou a IA retomando), a caminhada ou a câmera. */
+    /** A etapa da manhã começa, ou volta depois do STOP e do bom dia: a conversa (com a [primeira] fala da IA, ou a IA retomando) ou a caminhada. */
     private fun continuarManha(primeira: String? = null) {
         handler.removeCallbacks(comecarAtividade)
         handler.removeCallbacks(anunciarInicio)
         _saudando.value = false
         when (etapa) {
             EtapaDaManha.CONVERSA -> abrirConversa(primeira)
-            EtapaDaManha.CAMINHADA -> comecarCaminhada()
-            EtapaDaManha.CAMERA, null -> comecarCamera()
+            EtapaDaManha.CAMINHADA, null -> comecarCaminhada()
         }
     }
 
@@ -1042,26 +1000,48 @@ class AlarmeService : Service() {
         val agora = SystemClock.elapsedRealtime()
         vezDaConversa = agora
         bipesDaConversa = 0
+        falaJunta = ""
+        handler.removeCallbacks(fimDaFala)
         _ultimaFala.value = agora
         _conversa.value = c.copy(suaVez = true, pensando = false, vez = ++vezes)
     }
 
-    /** O reconhecedor ouviu fala na vez da pessoa: o relógio anda, e o silêncio (e os bipes) recomeça do zero. */
+    /**
+     * O reconhecedor ouviu fala na vez da pessoa: o relógio anda, e o silêncio (e os bipes) recomeça do zero. Com
+     * uma frase já terminada nesta vez, ela continua falando: a fala só vai pra IA [FIM_DA_FALA_MS] depois deste som.
+     */
     private fun ouviuNaConversa() {
         val agora = SystemClock.elapsedRealtime()
         ouvidoEm = agora
         _ultimaFala.value = agora
         bipesDaConversa = 0
+        if (falaJunta.isNotEmpty()) {
+            handler.removeCallbacks(fimDaFala)
+            handler.postDelayed(fimDaFala, FIM_DA_FALA_MS)
+        }
     }
 
     /**
-     * A pessoa terminou de falar ([texto]): vai pra IA. Com a meta da conversa cumprida, em vez da IA vem a
-     * pergunta se ela quer continuar (uma vez só); na pergunta, a resposta decide; depois do tempo extra, acaba.
+     * A pessoa terminou uma frase ([texto]): junta com as anteriores desta vez e espera [FIM_DA_FALA_MS] de silêncio
+     * ([ouviuNaConversa]) pra ver se ela continua. O reconhecedor fecha a frase na primeira pausa: sem isso, a IA
+     * respondia a metade da resposta.
      */
     private fun respondeuNaConversa(texto: String) {
-        val c = _conversa.value?.takeIf { it.suaVez && etapa == EtapaDaManha.CONVERSA } ?: return
-        if (texto.isBlank()) return
+        if (_conversa.value?.suaVez != true || etapa != EtapaDaManha.CONVERSA || texto.isBlank()) return
+        falaJunta = "$falaJunta $texto".trim()
         ouviuNaConversa()
+    }
+
+    /**
+     * A pessoa parou de falar ([FIM_DA_FALA_MS] sem som depois da última frase): a fala inteira vai pra IA. Com a meta
+     * da conversa cumprida, em vez da IA vem a pergunta se ela quer continuar (uma vez só); na pergunta, a resposta
+     * decide; depois do tempo extra, acaba.
+     */
+    private val fimDaFala = Runnable {
+        val c = _conversa.value?.takeIf { it.suaVez && etapa == EtapaDaManha.CONVERSA } ?: return@Runnable
+        val texto = falaJunta
+        falaJunta = ""
+        if (texto.isBlank()) return@Runnable
         Log.i(TAG, "Conversa: ele respondeu (${texto.length} letras), ${conversadoMs / 1000} s de ${c.metaMs / 1000}")
         _conversa.value = c.copy(suaVez = false, pensando = true)
         when {
@@ -1092,23 +1072,27 @@ class AlarmeService : Service() {
     }
 
     /**
-     * Fim da conversa (meta cumprida, a pessoa não quis mais, ou a IA ou o reconhecimento de voz falharam): a voz
-     * fala a frase fixa da próxima etapa ([FALA_SAIR] ou [FALA_CAMERA]) e ela começa.
+     * Fim da conversa (meta cumprida, a pessoa não quis mais, ou a IA ou o reconhecimento de voz falharam): o modelo
+     * sai da memória e vem a caminhada ([irPraCaminhada]).
      */
     private fun terminarConversa(motivo: String) {
         if (etapa != EtapaDaManha.CONVERSA) return
         Log.i(TAG, "Conversa: fim ($motivo), ${conversadoMs / 1000} s de conversa")
-        val rodada = ++rodadaConversa // nada que estava pendente (IA, voz, fala da pessoa) vale mais
         handler.removeCallbacks(tiqueDaConversa)
+        handler.removeCallbacks(fimDaFala)
         motor?.desligar()
         motor = null
-        MotorDaConversa.liberar() // antes da caminhada ou da câmera: menos memória e menos calor
+        MotorDaConversa.liberar() // antes da caminhada: menos memória e menos calor
         iaFalando = false
-        val caminhar = caminho == CaminhoDaManha.CONVERSA_E_CAMINHADA
-        etapa = if (caminhar) EtapaDaManha.CAMINHADA else EtapaDaManha.CAMERA
-        val (fala, texto) = if (caminhar) FALA_DE_SAIR to FALA_SAIR else FALA_DE_CAMERA to FALA_CAMERA
-        _conversa.value = _conversa.value?.copy(falaDaIa = texto, suaVez = false, pensando = false, perguntandoSeContinua = false)
-        sirene.falar(voz?.fixa(fala)) {
+        _conversa.value = _conversa.value?.copy(falaDaIa = FALA_SAIR, suaVez = false, pensando = false, perguntandoSeContinua = false)
+        irPraCaminhada()
+    }
+
+    /** A caminhada vem agora (fim da conversa ou, sem a IA, logo depois do bom dia): a voz fala [FALA_SAIR] e ela começa. */
+    private fun irPraCaminhada() {
+        val rodada = ++rodadaConversa // nada que estava pendente (IA, voz, fala da pessoa) vale mais
+        etapa = EtapaDaManha.CAMINHADA
+        sirene.falar(voz?.fixa(FALA_DE_SAIR)) {
             if (rodada != rodadaConversa) return@falar
             _conversa.value = null
             continuarManha()
@@ -1130,7 +1114,7 @@ class AlarmeService : Service() {
 
     /** Sinal de "andando" da etapa da caminhada: guarda o tempo andado e a contagem pro bipe recomeça. */
     private fun andou(andadoMs: Long) {
-        // Sinal atrasado, de quando a música voltou ou a câmera tomou o lugar
+        // Sinal atrasado, de quando a música voltou
         if (_caminhada.value == null || !_silenciado.value || _saudando.value || cumprido) return
         andado = maxOf(andado, andadoMs)
         _caminhada.value = _caminhada.value?.copy(andadoMs = andado) // a tela recriada no meio continua daqui
@@ -1146,7 +1130,10 @@ class AlarmeService : Service() {
         handler.postDelayed(vigiaDaCaminhada, primeiroBipeParado(agora, prazoAte) - agora)
     }
 
-    /** Vigia da caminhada: parado depois do prazo pra sair, um bipe a cada [ENTRE_BIPES_PARADO_MS], mais alto até o máximo, até voltar a andar. Não zera nada. */
+    /**
+     * Vigia da caminhada: parado depois do prazo pra sair (ou sem GPS, dentro de casa, com a localização desligada),
+     * um bipe a cada [ENTRE_BIPES_PARADO_MS], mais alto até o máximo, até voltar a andar. Não zera nada.
+     */
     private val vigiaDaCaminhada = object : Runnable {
         override fun run() {
             bipesParado++
@@ -1156,40 +1143,15 @@ class AlarmeService : Service() {
         }
     }
 
-    /** O GPS não funciona na caminhada: a câmera fica no lugar do que faltava andar. A tela pode avisar de novo: vale uma vez. */
-    private fun semGpsNaCaminhada() {
-        if (_caminhada.value == null || etapa != EtapaDaManha.CAMINHADA || cumprido) return
-        Log.w(TAG, "Caminhada: GPS sem funcionar, a câmera fica no lugar do resto (${andado / 1000} s andados)")
-        etapa = EtapaDaManha.CAMERA
-        comecarCamera()
-    }
-
-    /** A meta da câmera: a de sempre ([metaOlhar]) ou, no lugar da caminhada, a da chuva ([metaCameraSemCaminhada]) ou o que faltava andar. */
-    private fun metaDaCamera(alarme: Alarme): Long = when {
-        !cameraNoLugarDaCaminhada -> metaOlhar(alarme)
-        caminho == CaminhoDaManha.CONVERSA_E_CAMERA -> metaCameraSemCaminhada(alarme)
-        else -> (metaCaminhada(alarme) - andado).coerceAtLeast(1_000L)
-    }
-
-    /** A câmera no lugar da caminhada: sem a verificação do meio (o olho já exigente) e com a vigia de sempre. */
-    private fun comecarCamera() {
-        val alarme = _tocando.value ?: return
-        handler.removeCallbacks(vigiaDaCaminhada)
-        _caminhada.value = null
-        cameraNoLugarDaCaminhada = true
-        _metaCamera.value = metaDaCamera(alarme)
-        _metadeVerificada.value = true
-        Log.i(TAG, "Missão: câmera no lugar da caminhada, ${_metaCamera.value / 1000} s (anel em ${_olhado.value / 1000} s)")
-        adiarVigia()
-    }
-
     /** A música voltou: a etapa da manhã para (o que chegar depois de antes não vale), e o caminho e o progresso ficam. */
     private fun pausarManha() {
         rodadaConversa++
         handler.removeCallbacks(tiqueDaConversa)
+        handler.removeCallbacks(fimDaFala)
         handler.removeCallbacks(vigiaDaCaminhada)
         handler.removeCallbacks(esperaDaDecisao)
         iaFalando = false
+        falaJunta = ""
         saudacaoTerminou = false
         _conversa.value = null
         _caminhada.value = null
@@ -1202,7 +1164,7 @@ class AlarmeService : Service() {
         }
     }
 
-    /** Alarme novo (ou um que não tem mais conversa e caminhada): a manhã começa do zero. */
+    /** Alarme novo (ou um que não é mais "conversa + caminhada"): a manhã começa do zero. */
     private fun esquecerManha() {
         rodadaConversa++
         motor?.desligar()
@@ -1215,24 +1177,21 @@ class AlarmeService : Service() {
         falhas = 0
         andado = 0
         prazoAte = 0
-        cameraNoLugarDaCaminhada = false
     }
 
     /**
      * Outro alarme juntou no meio ([EmAndamento.juntar]): os tempos seguem o alarme novo (o teste pede bem
-     * menos). Se ele não tem conversa e caminhada, a manhã nova para e a música volta: depois do STOP, a
-     * missão de sempre.
+     * menos). Se ele é o "câmera + frases", a manhã nova para e a música volta: depois do STOP, a missão de 40 min.
      */
     private fun ajustarManha(alarme: Alarme) {
         if (caminho == null || caminho == CaminhoDaManha.ANTIGO) return
         if (!comConversaECaminhada(alarme)) {
-            Log.i(TAG, "Serviço: o alarme novo não tem conversa e caminhada, a música volta e depois vem a missão de sempre")
+            Log.i(TAG, "Serviço: o alarme novo é o câmera + frases, a música volta e depois vem a missão de 40 min")
             religarMusica()
             esquecerManha()
         }
         _conversa.value = _conversa.value?.copy(metaMs = metaDaConversa(alarme))
         _caminhada.value = _caminhada.value?.copy(metaMs = metaCaminhada(alarme))
-        _metaCamera.value = metaDaCamera(alarme)
     }
 
     /** Missão cumprida (ou DESLIGAR, em alarme sem missão): o único fim do alarme. A limpeza acontece em [onDestroy]. */

@@ -33,11 +33,16 @@ const val TAMANHO_DO_MODELO = 2_588_147_712L
 /** Memória livre pra carregar o modelo com folga (carregado, o app fica com ~520 MB: medido no S24 FE) sem o Android matar o app. */
 private const val MEMORIA_MINIMA = 1_500L * 1024 * 1024
 
-/** Quanto de conversa (instrução, falas e respostas, em tokens) cabe: uns 8 min de conversa, com folga. */
-private const val CONTEXTO_TOKENS = 4096
+/**
+ * Quanto de conversa (instrução, falas e respostas, em tokens) cabe: a instrução (~750) e umas 30 trocas de ~100
+ * tokens, os 10 min de conversa pura e quase todo o extra. Medido no S24 FE: com 6144 ou 8192, ler a instrução e
+ * responder fica ~40% mais lento (a primeira fala demora o dobro), sem mudar a memória. Se encher, a IA para de
+ * responder e a conversa acaba uns minutos antes (a caminhada vem igual).
+ */
+const val CONTEXTO_TOKENS = 4096
 
-/** Tamanho máximo de uma resposta, em tokens: as falas pedidas têm até 45 palavras. */
-private const val RESPOSTA_MAX_TOKENS = 120
+/** Tamanho máximo de uma resposta, em tokens: as falas pedidas têm até 50 palavras. */
+const val RESPOSTA_MAX_TOKENS = 120
 
 /**
  * Uma conversa com o Gemma no celular ([MotorDaConversa]): a [instrucao] do treinador vira a instrução do

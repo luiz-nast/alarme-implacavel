@@ -129,15 +129,15 @@ private fun TelaPrincipal() {
                         Toast.makeText(ctx, "Toca em 10 segundos. Bloqueie a tela pra ver o efeito completo.", Toast.LENGTH_LONG).show()
                     },
                     onTestarCaminhada = {
-                        // Sem a localização, a caminhada vira câmera: pede no diálogo agora (sem abrir as Configurações;
-                        // ela só é conferida depois do STOP e do bom dia)
+                        // Sem a localização, a caminhada não conta: pede no diálogo agora (sem abrir as Configurações;
+                        // a tela da caminhada também tem o botão de liberar)
                         val comIa = MotorDaConversa.disponivel(ctx)
                         val semLocalizacao = Poder.LOCALIZACAO.permissaoFaltando(ctx) != null
-                        if (semLocalizacao && comIa) pedirPermissao.launch(Poder.LOCALIZACAO.pedido)
+                        if (semLocalizacao) pedirPermissao.launch(Poder.LOCALIZACAO.pedido)
                         Agendador.agendarTeste(ctx, 10, caminhada = true)
                         val aviso = when {
-                            !comIa -> "A IA do celular não está pronta: vai ser a missão de sempre."
-                            semLocalizacao -> "Libere a localização no aviso, senão a caminhada vira câmera."
+                            semLocalizacao -> "Libere a localização no aviso: sem ela, a caminhada não conta."
+                            !comIa -> "A IA do celular não está pronta: vai direto pra caminhada."
                             else -> "Bloqueie a tela pra ver o efeito completo."
                         }
                         Toast.makeText(ctx, "Toca em 10 segundos. $aviso", Toast.LENGTH_LONG).show()

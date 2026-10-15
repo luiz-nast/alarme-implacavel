@@ -9,6 +9,7 @@ import android.content.Context
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log
@@ -37,26 +38,24 @@ const val FALA_FIM = "Congratulations, sir! The activity is done. Have a good ti
 
 fun falaDosMinutos(minutos: Int) = "$minutos minutes passed."
 
-// Despertador com conversa e caminhada: as falas que não vêm da IA, gravadas junto com as outras fixas (só nesse alarme)
+// Despertador "conversa + caminhada": as falas que não vêm da IA, gravadas junto com as outras fixas (só nesse alarme)
 
 /** A conversa chegou na meta: em vez da IA, esta pergunta (a resposta passa por querContinuar). */
-const val FALA_CONTINUAR = "Five minutes of conversation, sir. Do you want to keep talking a little more?"
+const val FALA_CONTINUAR = "That was a good conversation, sir. Do you want to keep talking a little more?"
 
-/** Fim da conversa, com a caminhada em seguida. */
-const val FALA_SAIR = "Great talk, sir. Now get dressed and go outside: you have seven minutes to start walking."
-
-/** Fim da conversa, com a câmera no lugar da caminhada (chuva, sem localização). */
-const val FALA_CAMERA = "Great talk, sir. It's not a day for walking, so let's do the camera activity."
+/** Fim da conversa (ou, sem a IA, logo depois do bom dia): a caminhada em seguida, chova ou faça sol. */
+const val FALA_SAIR = "Time to move, sir. Get dressed and go outside: you have four minutes to start walking."
 
 /** No lugar de uma fala da IA que manda descansar ou diz que o alarme acabou (respostaSegura). */
 const val FALA_NAO_NEGOCIA = "Not my call, sir. The alarm decides. Tell me, what is the first thing you will do today?"
 
 /**
- * O sintetizador de voz do celular, em inglês (roda sem internet com a voz instalada). Criado quando o
+ * O sintetizador de voz do celular, em inglês, com uma voz instalada no celular ([vozSemInternet]): grava igual
+ * com ou sem internet, sem esperar servidor. Criado quando o
  * alarme começa (com o celular já desbloqueado desde que ligou: antes, o sintetizador nem abre): assim
  * que fica pronto, já grava as falas fixas ([FALA_INICIO] e os avisos de minutos), que depois saem na
- * hora. [gravar] grava uma fala nova (a saudação, que tem a hora); pedida antes de ele ficar pronto,
- * espera. Sem voz em inglês ou sem sintetizador, as falas não existem (null) e o alarme segue sem elas.
+ * hora. [gravar] grava uma fala nova (a saudação, que tem a hora; as falas da IA); pedida antes de ele ficar
+ * pronto, espera. Sem voz em inglês ou sem sintetizador, as falas não existem (null) e o alarme segue sem elas.
  */
 class Voz(ctx: Context, fixas: Map<String, String>) {
     private val pasta = ctx.cacheDir
@@ -65,6 +64,7 @@ class Voz(ctx: Context, fixas: Map<String, String>) {
     private val gravadas = mutableSetOf<String>()
     private val esperando = mutableMapOf<String, (File?) -> Unit>()
     private val naFila = mutableMapOf<String, String>() // pedidas antes de ficar pronta: id → texto
+    private val comecou = mutableMapOf<String, Long>() // das gravadas na hora ([gravar]): id → quando pediu, pro log do tempo
     private lateinit var tts: TextToSpeech
 
     init {
@@ -76,6 +76,7 @@ class Voz(ctx: Context, fixas: Map<String, String>) {
                 esperando.values.toList().also { esperando.clear() }.forEach { it(null) }
                 return@TextToSpeech
             }
+            vozSemInternet()
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(id: String) {}
                 override fun onDone(id: String) = entregar(id, ok = true)
@@ -98,6 +99,7 @@ class Voz(ctx: Context, fixas: Map<String, String>) {
      * pedido precisa de um [id] novo: uma gravação velha, que terminou depois, não chega no pedido seguinte.
      */
     fun gravar(id: String, texto: String, aoGravar: (File?) -> Unit) {
+        comecou[id] = SystemClock.elapsedRealtime()
         when (pronta) {
             false -> return aoGravar(null)
             null -> naFila[id] = texto
@@ -110,6 +112,7 @@ class Voz(ctx: Context, fixas: Map<String, String>) {
     fun cancelar() {
         esperando.clear()
         naFila.clear()
+        comecou.clear()
     }
 
     fun desligar() {
@@ -120,6 +123,27 @@ class Voz(ctx: Context, fixas: Map<String, String>) {
 
     private fun arquivo(id: String) = File(pasta, "fala_$id.wav")
 
+    /**
+     * A voz em inglês dos EUA instalada no celular, a de melhor qualidade. A voz padrão do Google pode ser a da
+     * internet, que depende do sinal (no teste no carro, o sintetizador chegou a ficar 15 s numa fala). Sem nenhuma
+     * instalada, fica a padrão.
+     */
+    private fun vozSemInternet() {
+        val atual = tts.voice
+        if (atual != null && !atual.isNetworkConnectionRequired) {
+            Log.i(TAG, "Voz: ${atual.name}")
+            return
+        }
+        val instalada = runCatching { tts.voices }.getOrNull().orEmpty()
+            .filter { it.locale == Locale.US && !it.isNetworkConnectionRequired && TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED !in it.features }
+            .maxByOrNull { it.quality }
+        if (instalada != null && tts.setVoice(instalada) == TextToSpeech.SUCCESS) {
+            Log.i(TAG, "Voz: ${instalada.name}, no lugar de ${atual?.name} (da internet)")
+        } else {
+            Log.w(TAG, "Voz: sem voz em inglês instalada no celular, fica a ${atual?.name}")
+        }
+    }
+
     private fun sintetizar(id: String, texto: String) {
         gravadas.remove(id)
         val ok = runCatching { tts.synthesizeToFile(texto, Bundle(), arquivo(id), id) == TextToSpeech.SUCCESS }.getOrDefault(false)
@@ -129,6 +153,7 @@ class Voz(ctx: Context, fixas: Map<String, String>) {
     private fun entregar(id: String, ok: Boolean) {
         handler.post {
             if (ok) gravadas += id
+            comecou.remove(id)?.let { Log.i(TAG, "Voz: \"$id\" ${if (ok) "gravada" else "falhou"} em ${SystemClock.elapsedRealtime() - it} ms") }
             esperando.remove(id)?.invoke(if (ok) arquivo(id) else null)
         }
     }

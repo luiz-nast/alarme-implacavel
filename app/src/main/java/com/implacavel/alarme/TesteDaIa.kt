@@ -1,8 +1,10 @@
-// Teste da IA do celular sem som e sem tela: carrega o modelo, conversa três falas de mentira e escreve no log o
-// tempo de carregar, o tempo até a primeira palavra, a velocidade, a memória e o calor. Só dá pra chamar pelo cabo
+// Teste da IA do celular sem som e sem tela: carrega o modelo, conversa umas falas de mentira (pra ver se ela fica no
+// assunto) e escreve no log as respostas, o tempo de carregar, o tempo até a primeira palavra, a velocidade, a memória
+// e o calor. Só dá pra chamar pelo cabo
 // (o adb tem a permissão DUMP, que nenhum app comum tem):
 //   adb shell am broadcast -n com.implacavel.alarme/.TesteDaIa
 //   adb logcat -s Implacavel
+// Pra comparar outro tamanho de conversa (em tokens), sem recompilar: --ei tokens 4096
 // Com um alarme tocando, não roda, e um alarme que começa no meio dele fica sem a IA ([ModeloLocal.emTeste]): o
 // modelo do alarme e o do teste não cabem juntos na memória.
 package com.implacavel.alarme
@@ -32,9 +34,22 @@ import kotlin.concurrent.thread
 /** O teste para antes disso: o Android dá uns 60 s pra um aviso de fundo terminar. */
 private const val TESTE_MAX_MS = 50_000L
 
+private val MANCHETES_DE_TESTE = listOf(
+    "Preço do café sobe 30% no ano e pesa no bolso do brasileiro - g1",
+    "Dólar fecha em queda e Bolsa sobe com expectativa de corte de juros - Folha",
+    "Frente fria derruba temperaturas em São Paulo nesta semana - CNN Brasil",
+    "Seleção brasileira vence o Chile e garante vaga na final - ge",
+    "Nova linha de metrô em São Paulo começa a operar em fase de testes - Estadão",
+)
+
+// Respostas de quem acabou de acordar: duas com assunto, duas curtas (o assunto morreu: aí ela pode trocar) e o pedido de dormir
 private val FALAS_DE_TESTE = listOf(
     PEDIDO_DE_ABERTURA,
-    "I slept badly, but I want to run today.",
+    "Really? I didn't know that. Why is that happening?",
+    "I think it's bad for normal people, everything is getting more expensive.",
+    "Yeah.",
+    "I don't know.",
+    "I want to finish the project at work and go to the gym.",
     "Can I sleep five more minutes?",
 )
 
@@ -53,7 +68,7 @@ class TesteDaIa : BroadcastReceiver() {
         val fim = goAsync()
         thread(name = "teste-da-ia") {
             try {
-                testar(ctx.applicationContext, arquivo.path)
+                testar(ctx.applicationContext, arquivo.path, intent.getIntExtra("tokens", CONTEXTO_TOKENS))
             } catch (e: Throwable) {
                 Log.w(TAG, "IA teste: falhou (${e.javaClass.simpleName}: ${e.message?.take(160)})")
             } finally {
@@ -71,21 +86,21 @@ class TesteDaIa : BroadcastReceiver() {
     }
 
     @OptIn(ExperimentalApi::class) // a medição de velocidade (ExperimentalFlags.enableBenchmark)
-    private fun testar(ctx: Context, caminho: String) {
+    private fun testar(ctx: Context, caminho: String, tokens: Int) {
         val inicio = SystemClock.elapsedRealtime()
-        Log.i(TAG, "IA teste: começando (memória livre ${memoriaLivreMb(ctx)} MB, calor ${calor(ctx)})")
+        Log.i(TAG, "IA teste: começando com $tokens tokens (memória livre ${memoriaLivreMb(ctx)} MB, calor ${calor(ctx)})")
         ExperimentalFlags.enableBenchmark = true
-        Engine(EngineConfig(modelPath = caminho, backend = Backend.CPU(), maxNumTokens = 4096, cacheDir = ctx.cacheDir.path)).use { engine ->
+        Engine(EngineConfig(modelPath = caminho, backend = Backend.CPU(), maxNumTokens = tokens, cacheDir = ctx.cacheDir.path)).use { engine ->
             engine.initialize()
             Log.i(TAG, "IA teste: modelo carregado em ${SystemClock.elapsedRealtime() - inicio} ms (memória do app ${memoriaDoAppMb(ctx)} MB)")
-            // Do tamanho de uma manhã de verdade: as 5 manchetes e as metas cheias (o modelo lê tudo antes de falar)
-            val manchetes = List(MANCHETES_MAX) { "Manchete de teste número ${it + 1} sobre economia, política e esporte - g1" }
+            // Do tamanho de uma manhã de verdade: 5 manchetes (inventadas, do jeito do Google Notícias) e as metas cheias
+            val manchetes = MANCHETES_DE_TESTE.take(MANCHETES_MAX)
             val metas = "Correr 5 km, estudar inglês e terminar o relatório do trabalho. ".repeat(20).take(METAS_MAX_LETRAS)
             val config = ConversationConfig(
                 systemInstruction = Contents.of(instrucaoDoTreinador(manchetes, metas, LocalTime.now())),
                 samplerConfig = SamplerConfig(topK = 40, topP = 0.95, temperature = 0.8),
                 prefillPrefaceOnInit = true,
-                maxOutputToken = 120,
+                maxOutputToken = RESPOSTA_MAX_TOKENS,
                 thinkingConfig = ThinkingConfig(enableThinking = false),
             )
             val antesDaInstrucao = SystemClock.elapsedRealtime()
@@ -111,6 +126,7 @@ class TesteDaIa : BroadcastReceiver() {
                     )
                     Log.i(TAG, "IA teste: \"${limparFala(resposta).take(300)}\"")
                 }
+                Log.i(TAG, "IA teste: memória do app depois da conversa ${memoriaDoAppMb(ctx)} MB")
             }
         }
         Log.i(TAG, "IA teste: fim em ${SystemClock.elapsedRealtime() - inicio} ms (calor ${calor(ctx)})")

@@ -27,7 +27,7 @@ enum class Poder(val titulo: String, val explicacao: String, val permissao: Stri
     ),
     MICROFONE("Microfone", "Pra ouvir você dizer STOP.", Manifest.permission.RECORD_AUDIO),
     CAMERA("Câmera", "Pra conferir que você está de olhos abertos.", Manifest.permission.CAMERA),
-    LOCALIZACAO("Localização", "Pra conferir a caminhada da manhã e saber se chove.", Manifest.permission.ACCESS_FINE_LOCATION),
+    LOCALIZACAO("Localização", "Pra contar a caminhada da manhã, pelo GPS.", Manifest.permission.ACCESS_FINE_LOCATION),
     ALARME_EXATO("Alarme no minuto exato", "Toca na hora certa mesmo com o celular dormindo."),
     TELA_CHEIA("Tela cheia", "Deixa o alarme tomar a tela, mesmo bloqueada."),
     CANAL("Alerta em destaque", "O canal \"Alarme tocando\" precisa estar com importância alta."),

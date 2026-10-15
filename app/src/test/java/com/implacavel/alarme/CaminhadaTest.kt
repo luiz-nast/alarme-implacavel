@@ -105,36 +105,22 @@ class CaminhadaTest {
     }
 
     @Test
-    fun caminhada18MinutosETeste1Minuto() {
+    fun caminhada16MinutosEPrazo4ETeste1Minuto() {
         val alarme = Alarme(1, 7, 0, caminhada = true)
         val teste = Alarme.teste(caminhada = true)
-        assertEquals(18 * 60_000L, metaCaminhada(alarme))
+        assertEquals(16 * 60_000L, metaCaminhada(alarme))
         assertEquals(60_000L, metaCaminhada(teste))
-        assertEquals(7 * 60_000L, prazoSair(alarme))
+        assertEquals(4 * 60_000L, prazoSair(alarme))
         assertEquals(20_000L, prazoSair(teste))
-        assertEquals(18 * 60_000L, metaCameraSemCaminhada(alarme))
-        assertEquals(30_000L, metaCameraSemCaminhada(teste))
-    }
-
-    @Test
-    fun gpsSoTemDefeitoSemOuvirSateliteOuMuitoTempoSemFixo() {
-        // Dentro de casa: o GPS ouve satélites fracos, sem fixo. Não é defeito: tem que ir pra rua
-        assertFalse(gpsComDefeito(surdoMs = 0, semFixoMs = 10 * 60_000L))
-        // Sem ouvir satélite nenhum por 5 min: defeito
-        assertFalse(gpsComDefeito(surdoMs = SEM_GPS_MS - 1, semFixoMs = SEM_GPS_MS - 1))
-        assertTrue(gpsComDefeito(surdoMs = SEM_GPS_MS, semFixoMs = SEM_GPS_MS))
-        // Ouvindo, mas sem fixo nenhum por 15 min: também, pra ninguém ficar preso num GPS que nunca acha o lugar
-        assertFalse(gpsComDefeito(surdoMs = 0, semFixoMs = SEM_FIXO_MAX_MS - 1))
-        assertTrue(gpsComDefeito(surdoMs = 0, semFixoMs = SEM_FIXO_MAX_MS))
     }
 
     @Test
     fun bipeDeParadoSoDepoisDoPrazoPraSair() {
-        val prazo = 420_000L // 7 min depois do começo da etapa
+        val prazo = 240_000L // 4 min depois do começo da etapa
         // No prazo, nada de bipe: a tela mostra quanto falta dele
-        assertNull(segundosProBipe(agora = 400_000, ultimoPasso = 0, prazoAte = prazo))
-        assertEquals("Você tem 6:32 pra começar a andar", avisoDoPrazo(agora = 28_000, prazoAte = prazo))
-        assertEquals("Você tem 20 s pra começar a andar", avisoDoPrazo(agora = 400_000, prazoAte = prazo))
+        assertNull(segundosProBipe(agora = 220_000, ultimoPasso = 0, prazoAte = prazo))
+        assertEquals("Você tem 3:32 pra começar a andar", avisoDoPrazo(agora = 28_000, prazoAte = prazo))
+        assertEquals("Você tem 20 s pra começar a andar", avisoDoPrazo(agora = 220_000, prazoAte = prazo))
         assertNull(avisoDoPrazo(agora = prazo, prazoAte = prazo))
         // Parado desde antes do fim do prazo: o 1º bipe 10 s depois dele
         assertEquals(prazo + 10_000, primeiroBipeParado(ultimoPasso = 100_000, prazoAte = prazo))
@@ -150,17 +136,8 @@ class CaminhadaTest {
     fun textosDaTela() {
         assertEquals("7:12", tempoAndado(432_999)) // o que já foi: não arredonda pra cima
         assertEquals("0:28", tempoAndado(28_400))
-        assertEquals("18:00", tempoAndado(CAMINHADA_MS))
+        assertEquals("16:00", tempoAndado(CAMINHADA_MS))
         assertEquals("1,3 m/s", textoDaVelocidade(1.34f))
         assertEquals("0,0 m/s", textoDaVelocidade(0f))
-    }
-
-    @Test
-    fun soCaminhaComCertezaDeQueNaoChove() {
-        assertTrue(podeCaminhar(localizacao = true, gpsLigado = true, chuva = false))
-        assertFalse(podeCaminhar(localizacao = true, gpsLigado = true, chuva = true))
-        assertFalse(podeCaminhar(localizacao = true, gpsLigado = true, chuva = null)) // sem internet: câmera
-        assertFalse(podeCaminhar(localizacao = false, gpsLigado = true, chuva = false))
-        assertFalse(podeCaminhar(localizacao = true, gpsLigado = false, chuva = false))
     }
 }

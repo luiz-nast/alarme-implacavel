@@ -1,21 +1,19 @@
 package com.implacavel.alarme
 
-import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalTime
-import java.util.Locale
 
-/** Regras da conversa da manhã (RegrasConversa.kt), as notícias e a chuva. */
+/** Regras da conversa da manhã (RegrasConversa.kt) e as notícias. */
 class ConversaTest {
 
     @Test
-    fun conversaPede5MinutosETeste60Segundos() {
-        assertEquals(5 * 60_000L, metaConversa(Alarme(1, 7, 0, caminhada = true)))
-        assertEquals(60_000L, metaConversa(Alarme.teste(caminhada = true)))
+    fun conversaPede10MinutosETeste4() {
+        assertEquals(10 * 60_000L, metaConversa(Alarme(1, 7, 0, caminhada = true)))
+        assertEquals(4 * 60_000L, metaConversa(Alarme.teste(caminhada = true)))
         assertEquals(3 * 60_000L, extraDaConversa(Alarme(1, 7, 0, caminhada = true)))
         assertEquals(20_000L, extraDaConversa(Alarme.teste(caminhada = true)))
     }
@@ -114,8 +112,9 @@ class ConversaTest {
         assertTrue(instrucao.contains("2. Dólar cai - g1"))
         assertTrue(instrucao.contains("Correr 3x por semana"))
         assertTrue(instrucao.contains("Not my call, sir. The alarm decides."))
-        assertTrue(instrucao.contains("open question"))
-        assertTrue(instrucao.contains("45 words"))
+        assertTrue(instrucao.contains("Stay on the same subject"))
+        assertTrue(instrucao.contains("Change the subject only when it has died"))
+        assertTrue(instrucao.contains("50 words"))
         // Sem notícias nem metas
         val vazia = instrucaoDoTreinador(emptyList(), "  ", LocalTime.of(14, 5))
         assertTrue(vazia.contains("2:05 PM"))
@@ -126,14 +125,6 @@ class ConversaTest {
         assertEquals(METAS_MAX_LETRAS, grande.count { it == '§' })
         assertTrue(grande.contains("$MANCHETES_MAX. Manchete $MANCHETES_MAX"))
         assertFalse(grande.contains("Manchete ${MANCHETES_MAX + 1}"))
-    }
-
-    @Test
-    fun caminhoDaManhaPelaInternetEPelaRua() {
-        assertEquals(CaminhoDaManha.ANTIGO, caminhoDaManha(conversaPossivel = false, caminhadaPossivel = true))
-        assertEquals(CaminhoDaManha.ANTIGO, caminhoDaManha(conversaPossivel = false, caminhadaPossivel = false))
-        assertEquals(CaminhoDaManha.CONVERSA_E_CAMINHADA, caminhoDaManha(conversaPossivel = true, caminhadaPossivel = true))
-        assertEquals(CaminhoDaManha.CONVERSA_E_CAMERA, caminhoDaManha(conversaPossivel = true, caminhadaPossivel = false))
     }
 
     @Test
@@ -188,45 +179,5 @@ class ConversaTest {
         assertEquals("Metas Correr 3x & ler", textoDasMetas(html))
         assertEquals("Ler 20 páginas", textoDasMetas("  Ler 20 páginas \n"))
         assertEquals(METAS_MAX_LETRAS, textoDasMetas("a".repeat(5_000)).length)
-    }
-
-    @Test
-    fun chuvaPelaPrecipitacaoOuPeloCodigo() {
-        assertFalse(estaChovendo(null, null)) // sem dados: sem chuva
-        assertFalse(estaChovendo(0.0, 1))
-        assertFalse(estaChovendo(0.19, 3))
-        assertTrue(estaChovendo(0.2, null))
-        for (codigo in listOf(51, 61, 67, 80, 82, 95, 99)) assertTrue("$codigo", estaChovendo(0.0, codigo))
-        for (codigo in listOf(0, 3, 45, 50, 68, 71, 79, 83, 94)) assertFalse("$codigo", estaChovendo(0.0, codigo))
-    }
-
-    @Test
-    fun chuvaNaRespostaDoOpenMeteo() {
-        val real = """{"latitude":-23.514938,"longitude":-46.610504,"generationtime_ms":19.4,"utc_offset_seconds":-10800,""" +
-            """"timezone":"America/Sao_Paulo","current_units":{"time":"iso8601","interval":"seconds","precipitation":"mm",""" +
-            """"weather_code":"wmo code"},"current":{"time":"2026-10-14T09:00","interval":900,"precipitation":0.00,"weather_code":1}}"""
-        assertEquals(false, chuvaDoOpenMeteo(real))
-        assertEquals(true, chuvaDoOpenMeteo(real.replace("\"precipitation\":0.00", "\"precipitation\":1.4")))
-        assertEquals(true, chuvaDoOpenMeteo(real.replace("\"weather_code\":1}", "\"weather_code\":63}")))
-        assertEquals(true, chuvaDoOpenMeteo("""{"current":{"precipitation":null,"weather_code":95}}"""))
-        // Resposta quebrada ou erro: não dá pra saber (e aí a caminhada vira câmera)
-        assertNull(chuvaDoOpenMeteo("""{"error":true,"reason":"Latitude must be in range of -90 to 90°."}"""))
-        assertNull(chuvaDoOpenMeteo(""))
-        assertNull(chuvaDoOpenMeteo("""{"current":{"time":"x","interval":900}}"""))
-        assertNull(chuvaDoOpenMeteo("""{"current":{"precipitation":null,"weather_code":null}}"""))
-    }
-
-    @Test
-    fun enderecoDoClimaArredondaOLugarComPonto() {
-        val antes = Locale.getDefault()
-        Locale.setDefault(Locale.forLanguageTag("pt-BR")) // no celular em português, %.2f daria vírgula
-        try {
-            assertEquals(
-                "https://api.open-meteo.com/v1/forecast?latitude=-23.51&longitude=-46.61&current=precipitation,weather_code",
-                enderecoDoClima(-23.514938, -46.610504),
-            )
-        } finally {
-            Locale.setDefault(antes)
-        }
     }
 }

@@ -18,8 +18,8 @@ val SUBIDA_ALARME = Subida(0.10f, 0.40f, 30_000)
 /** Remédio: um toque suave, sem a música, de 15% a 75% em 2 min. */
 val SUBIDA_REMEDIO = Subida(0.15f, 0.75f, 120_000)
 
-/** A voz do app (bom dia, avisos, frases, parabéns): um pouco abaixo da música, que vai a 40%. O dono pediu 30%. */
-const val VOLUME_DA_VOZ = 0.30f
+/** A voz do app (bom dia, avisos, frases, a IA, parabéns), sempre igual do começo ao fim da fala. O dono pediu 45% (30% ficou baixo). */
+const val VOLUME_DA_VOZ = 0.45f
 
 /**
  * Um alarme salvo pelo usuário, com as regras de quando ele toca (e, no fim do arquivo, o
@@ -31,9 +31,9 @@ const val VOLUME_DA_VOZ = 0.30f
  * @property missao só desliga dizendo STOP e olhando pra câmera de olhos abertos (veja Missao.kt).
  * @property remedio lembrete de remédio: toca um toque suave do app em vez da música, subindo como
  *   [SUBIDA_REMEDIO].
- * @property caminhada despertador com conversa e caminhada: depois do STOP, 5 min de conversa com a
- *   IA do celular e 18 min andando na rua (com chuva, ou sem internet pra saber, câmera; sem a IA, a missão de
- *   40 min). Só vale com [missao].
+ * @property caminhada despertador "conversa + caminhada": depois do STOP, 10 min de conversa com a IA do
+ *   celular, 4 min pra sair e 16 min andando na rua, chova ou faça sol (sem a IA, direto pra caminhada). Sem ele, o
+ *   despertador é o "câmera + frases". Só vale com [missao].
  */
 data class Alarme(
     val id: Int,
@@ -55,7 +55,7 @@ data class Alarme(
     val deTeste: Boolean get() = id == ID_TESTE || id == ID_TESTE_CAMINHADA
 
     /**
-     * Um tipo só por alarme: com missão é despertador (com atividade, ou com conversa e caminhada), sem
+     * Um tipo só por alarme: com missão é despertador ("câmera + frases" ou "conversa + caminhada"), sem
      * missão é lembrete de remédio. Versões antigas deixavam missão e remédio juntos, ou nenhum dos dois.
      */
     fun normalizado(): Alarme = copy(remedio = !missao, caminhada = caminhada && missao)
@@ -82,18 +82,18 @@ data class Alarme(
         .put("caminhada", caminhada)
 
     companion object {
-        /** Id reservado pro botão "Testar o alarme de sempre". Os alarmes salvos começam em 1. */
+        /** Id reservado pro botão "Testar câmera + frases". Os alarmes salvos começam em 1. */
         const val ID_TESTE = 0
 
-        /** Id reservado pro botão "Testar conversa e caminhada". */
+        /** Id reservado pro botão "Testar conversa + caminhada". */
         const val ID_TESTE_CAMINHADA = -1
 
-        /** O alarme de um botão de teste: o de sempre, ou com [caminhada] (conversa com a IA e caminhada). */
+        /** O alarme de um botão de teste: "câmera + frases", ou com [caminhada], "conversa + caminhada". */
         fun teste(caminhada: Boolean = false) =
             if (caminhada) {
-                Alarme(id = ID_TESTE_CAMINHADA, hora = 0, minuto = 0, rotulo = "Teste da conversa e caminhada", caminhada = true)
+                Alarme(id = ID_TESTE_CAMINHADA, hora = 0, minuto = 0, rotulo = "Teste conversa + caminhada", caminhada = true)
             } else {
-                Alarme(id = ID_TESTE, hora = 0, minuto = 0, rotulo = "Teste do Alarme Implacável")
+                Alarme(id = ID_TESTE, hora = 0, minuto = 0, rotulo = "Teste câmera + frases")
             }
 
         fun deJson(o: JSONObject): Alarme {
@@ -126,7 +126,7 @@ data class EmAndamento(val alarme: Alarme, val desde: Long, val musica: String?,
      * Alarme de verdade no meio do teste toma o lugar dele, com as regras dele (a câmera do teste pede
      * bem menos, veja [metaOlhar]), tocando desde agora e com o volume de antes do teste. Dois alarmes
      * de verdade viram um: este continua, com a exigência maior dos dois (e com a música, se um deles tiver;
-     * e com a conversa e caminhada, se um deles tiver).
+     * e com a conversa + caminhada, se um deles tiver).
      */
     fun juntar(outro: Alarme, agora: Long): EmAndamento = when {
         outro.deTeste -> this
