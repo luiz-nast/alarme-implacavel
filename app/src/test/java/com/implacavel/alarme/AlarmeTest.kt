@@ -73,7 +73,7 @@ class AlarmeTest {
         assertTrue(Alarme.ID_TESTE_CAMINHADA != Alarme.ID_TESTE && Alarme.ID_TESTE_CAMINHADA < 1)
         assertFalse(Alarme(1, 7, 0).deTeste)
         assertFalse(Alarme(1, 7, 0, caminhada = true).deTeste)
-        // Sem internet, a missão de sempre, com a câmera curta do teste
+        // Se um câmera + frases tomar o lugar dele, a câmera do teste também é curta
         assertEquals(META_OLHAR_TESTE_MS, metaOlhar(caminhada))
     }
 

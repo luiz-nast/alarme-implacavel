@@ -156,7 +156,7 @@ data class EmAndamento(val alarme: Alarme, val desde: Long, val musica: String?,
     /** Volume dos sons de aviso (bipe positivo, plim, parabéns): o do fim da subida (40%), sempre, mesmo que a subida não tenha acabado. */
     fun volumeDosAvisos(maximo: Int): Int = (maximo * subida.fim).roundToInt()
 
-    /** Volume da voz do app: [VOLUME_DA_VOZ], abaixo dos avisos. */
+    /** Volume da voz do app: [VOLUME_DA_VOZ], um pouco acima dos avisos e da música (40%). */
     fun volumeDaVoz(maximo: Int): Int = (maximo * VOLUME_DA_VOZ).roundToInt()
 
     private val subida get() = if (alarme.remedio) SUBIDA_REMEDIO else SUBIDA_ALARME

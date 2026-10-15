@@ -130,6 +130,7 @@ private fun TelaAlarme(alarme: Alarme) {
     val caminhada by AlarmeService.caminhada.collectAsStateWithLifecycle()
     val metaCamera = metaOlhar(alarme)
     val comemorando by AlarmeService.comemorando.collectAsStateWithLifecycle()
+    val comCaminhada by AlarmeService.comCaminhada.collectAsStateWithLifecycle()
     val desbloqueado = celularDesbloqueado()
     val agora = agoraACada(1_000)
 
@@ -172,7 +173,7 @@ private fun TelaAlarme(alarme: Alarme) {
             // Logo depois de o celular reiniciar, a voz do Google só roda depois do primeiro desbloqueio
             !desbloqueado -> pagina { EtapaDesbloquear() }
             !silenciado -> pagina { EtapaFalar(metaCamera, onStop = { AlarmeService.silenciar(ctx) }) }
-            saudando -> pagina { EtapaSaudacao(agora.hour, caminhada = alarme.missao && alarme.caminhada) }
+            saudando -> pagina { EtapaSaudacao(agora.hour, caminhada = comCaminhada) }
             verificacao != null -> verificacao?.let { passo -> pagina { EtapaVerificacao(passo) } }
             conversa != null -> conversa?.let { c -> pagina { EtapaConversa(c) } }
             caminhada != null -> caminhada?.let { c ->

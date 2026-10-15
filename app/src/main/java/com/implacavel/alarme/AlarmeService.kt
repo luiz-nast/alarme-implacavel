@@ -167,6 +167,11 @@ class AlarmeService : Service() {
         /** true = a pessoa já disse "stop" e a música está calada: a tela do alarme mostra a etapa da câmera. */
         val silenciado: StateFlow<Boolean> = _silenciado.asStateFlow()
 
+        private val _comCaminhada = MutableStateFlow(false)
+
+        /** Esta manhã é a do "conversa + caminhada" (a tela do bom dia diz "Preparando a manhã…", não "A câmera já vai começar"). */
+        val comCaminhada: StateFlow<Boolean> = _comCaminhada.asStateFlow()
+
         private val _saudando = MutableStateFlow(false)
 
         /** true = acabou de dizer "stop" e a voz está dando bom dia: a tela mostra a saudação, ainda sem câmera. */
@@ -265,8 +270,8 @@ class AlarmeService : Service() {
         /** A pessoa vai desbloquear o celular ou liberar a câmera: por [TEMPO_FORA_MS] a tela do alarme não reabre. */
         fun darTempo(ctx: Context) { ctx.startService(comando(ctx, ACAO_DAR_TEMPO)) }
 
-        /** Na verificação, o reconhecedor ouviu alguma fala: a pessoa está respondendo. */
-        fun ouviu(ctx: Context) { ctx.startService(comando(ctx, ACAO_OUVIU)) }
+        /** Na verificação ou na conversa, o reconhecedor ouviu alguma fala ([texto], o pedaço da frase de agora): a pessoa está respondendo. */
+        fun ouviu(ctx: Context, texto: String = "") { ctx.startService(comando(ctx, ACAO_OUVIU).putExtra(EXTRA_TEXTO, texto)) }
 
         /** Na verificação, a pessoa repetiu a frase da vez. */
         fun repetiu(ctx: Context) { ctx.startService(comando(ctx, ACAO_REPETIU)) }
@@ -326,6 +331,7 @@ class AlarmeService : Service() {
     private var vezDaConversa = 0L // SystemClock.elapsedRealtime em que começou a vez da pessoa
     private var ouvidoEm = 0L // a última fala ouvida na vez da pessoa
     private var falaJunta = "" // as frases terminadas desta vez da pessoa, esperando ela parar de falar ([fimDaFala])
+    private var falaAberta = "" // o pedaço que ela ainda está falando, depois da última frase terminada (o que a tela mostra)
     private var bipesDaConversa = 0 // do silêncio, desde a última fala
     private var vezes = 0 // vezes da pessoa ([Conversa.vez])
     private var falasDaIa = 0 // cada fala da IA grava num arquivo seu
@@ -438,7 +444,7 @@ class AlarmeService : Service() {
             // Na conversa, toda fala na vez da pessoa conta. Na verificação, fala que não acerta a frase só segura
             // a contagem do silêncio até o prazo da frase
             acao == ACAO_OUVIU -> if (_conversa.value?.suaVez == true) {
-                ouviuNaConversa()
+                ouviuNaConversa(intent.getStringExtra(EXTRA_TEXTO).orEmpty())
             } else if (_verificacao.value?.suaVez == true && SystemClock.elapsedRealtime() - vezComecou < PRAZO_FRASE_MS) {
                 esperarResposta()
             }
@@ -478,6 +484,7 @@ class AlarmeService : Service() {
         _conversa.value = null
         _caminhada.value = null
         _tocando.value = null
+        _comCaminhada.value = false
         if (processador.isHeld) processador.release()
         super.onDestroy()
     }
@@ -589,6 +596,7 @@ class AlarmeService : Service() {
         _saudando.value = true
         // Missão de 40 min já começada: um "conversa + caminhada" que juntar depois não muda o caminho
         if (manhaNova()) prepararManha() else if (caminho == null) caminho = CaminhoDaManha.ANTIGO
+        _comCaminhada.value = manhaNova()
         handler.postDelayed(comecarAtividade, SAUDACAO_MAX_MS)
         val falar: (File?) -> Unit = { arquivo ->
             if (_saudando.value) sirene.falar(arquivo) { handler.postDelayed(anunciarInicio, PAUSA_DEPOIS_DA_SAUDACAO_MS) }
@@ -842,6 +850,7 @@ class AlarmeService : Service() {
             else -> CaminhoDaManha.SO_CAMINHADA
         }
         caminho = escolhido
+        _comCaminhada.value = manhaNova()
         Log.i(TAG, "Conversa: caminho da manhã $escolhido")
         if (escolhido == CaminhoDaManha.CONVERSA_E_CAMINHADA && primeira != null) {
             etapa = EtapaDaManha.CONVERSA
@@ -1001,20 +1010,23 @@ class AlarmeService : Service() {
         vezDaConversa = agora
         bipesDaConversa = 0
         falaJunta = ""
+        falaAberta = ""
         handler.removeCallbacks(fimDaFala)
         _ultimaFala.value = agora
         _conversa.value = c.copy(suaVez = true, pensando = false, vez = ++vezes)
     }
 
     /**
-     * O reconhecedor ouviu fala na vez da pessoa: o relógio anda, e o silêncio (e os bipes) recomeça do zero. Com
-     * uma frase já terminada nesta vez, ela continua falando: a fala só vai pra IA [FIM_DA_FALA_MS] depois deste som.
+     * O reconhecedor ouviu fala na vez da pessoa ([texto], o pedaço da frase de agora): o relógio anda, e o silêncio
+     * (e os bipes) recomeça do zero. Com uma frase já terminada nesta vez, ela continua falando: a fala só vai pra IA
+     * [FIM_DA_FALA_MS] depois deste som, com este pedaço junto (se a frase dele não terminar a tempo, não se perde).
      */
-    private fun ouviuNaConversa() {
+    private fun ouviuNaConversa(texto: String = "") {
         val agora = SystemClock.elapsedRealtime()
         ouvidoEm = agora
         _ultimaFala.value = agora
         bipesDaConversa = 0
+        if (texto.isNotBlank()) falaAberta = texto
         if (falaJunta.isNotEmpty()) {
             handler.removeCallbacks(fimDaFala)
             handler.postDelayed(fimDaFala, FIM_DA_FALA_MS)
@@ -1029,6 +1041,7 @@ class AlarmeService : Service() {
     private fun respondeuNaConversa(texto: String) {
         if (_conversa.value?.suaVez != true || etapa != EtapaDaManha.CONVERSA || texto.isBlank()) return
         falaJunta = "$falaJunta $texto".trim()
+        falaAberta = "" // era esta frase, agora terminada
         ouviuNaConversa()
     }
 
@@ -1039,8 +1052,9 @@ class AlarmeService : Service() {
      */
     private val fimDaFala = Runnable {
         val c = _conversa.value?.takeIf { it.suaVez && etapa == EtapaDaManha.CONVERSA } ?: return@Runnable
-        val texto = falaJunta
+        val texto = "$falaJunta $falaAberta".trim()
         falaJunta = ""
+        falaAberta = ""
         if (texto.isBlank()) return@Runnable
         Log.i(TAG, "Conversa: ele respondeu (${texto.length} letras), ${conversadoMs / 1000} s de ${c.metaMs / 1000}")
         _conversa.value = c.copy(suaVez = false, pensando = true)
@@ -1088,15 +1102,25 @@ class AlarmeService : Service() {
         irPraCaminhada()
     }
 
-    /** A caminhada vem agora (fim da conversa ou, sem a IA, logo depois do bom dia): a voz fala [FALA_SAIR] e ela começa. */
+    /**
+     * A caminhada vem agora (fim da conversa ou, sem a IA, logo depois do bom dia): a voz fala [FALA_SAIR] e ela começa.
+     * Um bom dia que ainda estava gravando (voz lenta, e o prazo dele já passou) não toca mais: por cima da fala, ela
+     * nunca terminaria e a manhã ficaria parada. E se a fala travar, a caminhada começa assim mesmo em [SAUDACAO_MAX_MS].
+     */
     private fun irPraCaminhada() {
         val rodada = ++rodadaConversa // nada que estava pendente (IA, voz, fala da pessoa) vale mais
         etapa = EtapaDaManha.CAMINHADA
-        sirene.falar(voz?.fixa(FALA_DE_SAIR)) {
-            if (rodada != rodadaConversa) return@falar
-            _conversa.value = null
-            continuarManha()
+        voz?.cancelar()
+        var foi = false
+        val seguir = {
+            if (rodada == rodadaConversa && !foi) {
+                foi = true
+                _conversa.value = null
+                continuarManha()
+            }
         }
+        handler.postDelayed({ seguir() }, SAUDACAO_MAX_MS)
+        sirene.falar(voz?.fixa(FALA_DE_SAIR)) { seguir() }
     }
 
     /**
@@ -1152,6 +1176,7 @@ class AlarmeService : Service() {
         handler.removeCallbacks(esperaDaDecisao)
         iaFalando = false
         falaJunta = ""
+        falaAberta = ""
         saudacaoTerminou = false
         _conversa.value = null
         _caminhada.value = null
@@ -1256,7 +1281,13 @@ class AlarmeService : Service() {
         return NotificationCompat.Builder(this, Notificacoes.CANAL_ALARME)
             .setSmallIcon(R.drawable.ic_alarme)
             .setContentTitle(alarme.nome)
-            .setContentText(if (alarme.missao) "$agora · diga STOP e olhe pra câmera" else "$agora · tocando")
+            .setContentText(
+                when {
+                    !alarme.missao -> "$agora · tocando"
+                    alarme.caminhada -> "$agora · diga STOP: conversa + caminhada"
+                    else -> "$agora · diga STOP e olhe pra câmera"
+                },
+            )
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)

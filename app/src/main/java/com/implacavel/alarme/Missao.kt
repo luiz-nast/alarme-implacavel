@@ -307,7 +307,7 @@ fun EtapaConversa(conversa: Conversa) {
                 ctx, "resposta", aceita = { false },
                 onOuviu = {
                     ouvido = "$frasesDitas $it".trim()
-                    AlarmeService.ouviu(ctx)
+                    AlarmeService.ouviu(ctx, it)
                 },
                 onAceito = {},
                 onIndisponivel = { AlarmeService.semVozNaConversa(ctx) },

@@ -15,7 +15,7 @@ import kotlin.concurrent.thread
 /** Principais notícias do Brasil, em português (RSS do Google Notícias). */
 private const val ENDERECO_DAS_NOTICIAS = "https://news.google.com/rss?hl=pt-BR&gl=BR&ceid=BR:pt-419"
 
-/** Tempo pra conectar e pra cada leitura nas buscas de notícias, metas e clima. */
+/** Tempo pra conectar e pra cada leitura nas buscas de notícias e metas. */
 private const val ESPERA_BUSCA_MS = 5_000
 
 /** O máximo que uma busca lê (o RSS tem uns 100 mil letras): um endereço errado não enche a memória. */
