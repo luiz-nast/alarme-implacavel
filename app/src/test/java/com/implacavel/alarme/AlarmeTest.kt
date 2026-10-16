@@ -174,6 +174,10 @@ class AlarmeTest {
         assertEquals(1f, alarme.ganhoDaVoz(maximo = 15, fracao = 0.6f), 0.001f)
         assertEquals(1, alarme.volumeDaVoz(maximo = 15, fracao = 0.01f)) // nunca muda
         assertEquals(15, alarme.volumeDaVoz(maximo = 15, fracao = 1f))
+        // Em dB (o Android diz quantos dB tem cada degrau): na metade do caminho entre degraus de 4 dB, 2 dB abaixo
+        assertEquals(0.794f, ganhoEntreDegraus(0.5f, dbBaixo = -24f, dbCima = -20f), 0.001f)
+        assertEquals(1f, ganhoEntreDegraus(1f, dbBaixo = -24f, dbCima = -20f), 0.001f)
+        assertEquals(1f, ganhoEntreDegraus(0.5f, dbBaixo = Float.NEGATIVE_INFINITY, dbCima = -20f), 0.001f) // degrau mudo
         // Remédio junto com um alarme de música: fica a música
         assertFalse(remedio.juntar(Alarme(3, 8, 0), agora = 10).alarme.remedio)
         assertTrue(remedio.juntar(Alarme(4, 8, 0, remedio = true), agora = 10).alarme.remedio)

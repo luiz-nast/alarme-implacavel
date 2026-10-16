@@ -4,6 +4,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.time.ZonedDateTime
 import kotlin.math.ceil
+import kotlin.math.pow
 import kotlin.math.roundToInt
 
 /** Volume do alarme tocando: começa em [inicio] e sobe em linha reta até [fim] em [ms] (frações do volume de alarme do celular). */
@@ -167,7 +168,10 @@ data class EmAndamento(val alarme: Alarme, val desde: Long, val musica: String?,
      */
     fun volumeDaVoz(maximo: Int, fracao: Float = VOLUME_DA_VOZ): Int = ceil(maximo * fracao - 0.001).toInt().coerceIn(1, maximo)
 
-    /** Quanto da fala toca dentro do degrau de [volumeDaVoz] (de 0 a 1), pra ficar na [fracao] escolhida. */
+    /**
+     * Quanto da fala toca dentro do degrau de [volumeDaVoz] (de 0 a 1), pra ficar na [fracao] escolhida, pela conta
+     * simples (os degraus como se fossem iguais). A Sirene usa [ganhoEntreDegraus], em dB, quando o Android diz os dB.
+     */
     fun ganhoDaVoz(maximo: Int, fracao: Float = VOLUME_DA_VOZ): Float = (maximo * fracao / volumeDaVoz(maximo, fracao)).coerceIn(0.05f, 1f)
 
     private val subida get() = if (alarme.remedio) SUBIDA_REMEDIO else SUBIDA_ALARME
@@ -186,4 +190,15 @@ data class EmAndamento(val alarme: Alarme, val desde: Long, val musica: String?,
             volume = o.getInt("volume"),
         )
     }
+}
+
+/**
+ * O ganho da fala no degrau de cima, pra ela soar [fracaoDoDegrau] (de 0 a 1) do caminho entre o degrau de baixo
+ * ([dbBaixo]) e o de cima ([dbCima]), em dB: os degraus do volume do Android são em dB, e o ganho do MediaPlayer é
+ * linear. Com 15 degraus de uns 3 dB, 30% e 35% soam diferente.
+ */
+fun ganhoEntreDegraus(fracaoDoDegrau: Float, dbBaixo: Float, dbCima: Float): Float {
+    if (!dbBaixo.isFinite() || !dbCima.isFinite() || dbCima <= dbBaixo) return 1f
+    val fracao = fracaoDoDegrau.coerceIn(0f, 1f)
+    return 10.0.pow(((fracao - 1) * (dbCima - dbBaixo) / 20).toDouble()).toFloat().coerceIn(0.05f, 1f)
 }

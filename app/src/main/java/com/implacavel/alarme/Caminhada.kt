@@ -121,7 +121,7 @@ fun EtapaCaminhada(
     // Continua do que o serviço guardou; parado, o tempo andado fica onde está e nunca desce
     var andadoMs by remember { mutableLongStateOf(andadoInicialMs) }
     var leitura by remember { mutableStateOf<LeituraGps?>(null) }
-    var janela by remember { mutableStateOf(emptyList<Fixo>()) } // os fixos válidos dos últimos 10 s: o deslocamento é medido neles
+    var janela by remember { mutableStateOf(Janela()) } // os fixos válidos dos últimos 30 s (JANELA_MS): o deslocamento é medido neles
     val trilha = remember { mutableStateListOf<PontoDaTrilha>() }
     var ligada by remember { mutableStateOf(gpsLigado(ctx)) }
     var permitida by remember { mutableStateOf(Poder.LOCALIZACAO.liberado(ctx)) }

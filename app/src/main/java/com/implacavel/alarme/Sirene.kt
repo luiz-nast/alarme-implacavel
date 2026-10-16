@@ -75,7 +75,23 @@ class Sirene(private val ctx: Context) {
     /** Os sons de aviso saem sempre no volume do fim da subida (40%), mesmo com ela no começo; a voz, no da tela principal ([Ajustes.volumeDaVoz], 30% de começo). */
     private fun volumeDosAvisos() = foto?.volumeDosAvisos(audio.getStreamMaxVolume(AudioManager.STREAM_ALARM)) ?: 0
     private fun volumeDaVoz() = foto?.volumeDaVoz(audio.getStreamMaxVolume(AudioManager.STREAM_ALARM), Ajustes.volumeDaVoz) ?: 0
-    private fun ganhoDaVoz() = foto?.ganhoDaVoz(audio.getStreamMaxVolume(AudioManager.STREAM_ALARM), Ajustes.volumeDaVoz) ?: 1f
+
+    /**
+     * Quanto a fala toca dentro do degrau dela ([EmAndamento.volumeDaVoz]). Os degraus do volume de alarme são em dB:
+     * do Android 9 em diante, o ganho sai da interpolação entre o degrau de baixo e o de cima, em dB, no alto-falante
+     * ([ganhoEntreDegraus]); antes dele, a conta simples ([EmAndamento.ganhoDaVoz]).
+     */
+    private fun ganhoDaVoz(): Float {
+        val em = foto ?: return 1f
+        val maximo = audio.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+        val fracao = Ajustes.volumeDaVoz
+        val degrau = em.volumeDaVoz(maximo, fracao)
+        if (Build.VERSION.SDK_INT < 28 || degrau <= 1) return em.ganhoDaVoz(maximo, fracao)
+        return runCatching {
+            val db = { d: Int -> audio.getStreamVolumeDb(AudioManager.STREAM_ALARM, d, AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) }
+            ganhoEntreDegraus(maximo * fracao - (degrau - 1), db(degrau - 1), db(degrau))
+        }.getOrElse { em.ganhoDaVoz(maximo, fracao) }
+    }
 
     /** Fim do bipe: o volume de alarme volta ao de antes dele. */
     private val voltarDoBipe = Runnable {
