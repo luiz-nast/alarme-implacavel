@@ -5,6 +5,11 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.exp
+import kotlin.math.sin
+import kotlin.math.sqrt
 
 /** Regras da caminhada da manhã (RegrasCaminhada.kt). */
 class CaminhadaTest {
@@ -12,7 +17,7 @@ class CaminhadaTest {
     /** 1 m de latitude, em graus (a Terra de raio 6.371 km). */
     private val metroEmGraus = 1 / 111_195.0
 
-    /** Um fixo em São Paulo, [norteM] metros ao norte do ponto de partida, com GPS bom (±8 m). */
+    /** Um fixo em São Paulo, [norteM] metros ao norte (e [lesteM] a leste) do ponto de partida, com GPS bom (±8 m). */
     private fun fixo(
         tempoMs: Long,
         norteM: Double = 0.0,
@@ -20,7 +25,12 @@ class CaminhadaTest {
         velocidade: Float? = null,
         precisaoVelocidade: Float? = null,
         falso: Boolean = false,
-    ) = Fixo(tempoMs, -23.55 + norteM * metroEmGraus, -46.63, precisao, velocidade, precisaoVelocidade, falso)
+        rumo: Float? = null,
+        lesteM: Double = 0.0,
+    ) = Fixo(
+        tempoMs, -23.55 + norteM * metroEmGraus, -46.63 + lesteM * metroEmGraus / cos(Math.toRadians(23.55)),
+        precisao, velocidade, precisaoVelocidade, falso, rumo,
+    )
 
     /** Passa os [fixos] pela regra, um por um, como a tela: o tempo somado andando e o movimento do último. */
     private fun andar(fixos: List<Fixo>): Pair<Long, Movimento> {
@@ -37,14 +47,15 @@ class CaminhadaTest {
 
     @Test
     fun andarDeVerdadeConta() {
-        // 20 s a 1,3 m/s, um fixo por segundo: os 7 primeiros são pra ter certeza de que saiu do lugar
-        val (andado, agora) = andar((0..20).map { t -> fixo(t * 1_000L, norteM = 1.3 * t, velocidade = 1.3f) })
-        assertEquals(14_000L, andado)
+        // 20 s a 1,3 m/s pro norte, um fixo por segundo, com a velocidade e o rumo do GPS: os 10 primeiros segundos
+        // são pra ter certeza de que saiu do lugar
+        val (andado, agora) = andar((0..20).map { t -> fixo(t * 1_000L, norteM = 1.3 * t, velocidade = 1.3f, precisaoVelocidade = 0.5f, rumo = 0f) })
+        assertEquals(11_000L, andado)
         assertEquals(Movimento.ANDANDO, agora)
-        // Corrida leve e passo lento (sem a velocidade do GPS, só pelo deslocamento) também
-        assertEquals(14_000L, andar((0..20).map { t -> fixo(t * 1_000L, norteM = 3.5 * t) }).first)
-        // No passo lento, a certeza demora 2 s a mais (o deslocamento tem que passar da incerteza, 8 m)
-        assertEquals(12_000L, andar((0..20).map { t -> fixo(t * 1_000L, norteM = 0.9 * t) }).first)
+        // Corrida leve (sem a velocidade do GPS, só pelo deslocamento) também
+        assertEquals(11_000L, andar((0..20).map { t -> fixo(t * 1_000L, norteM = 3.5 * t) }).first)
+        // No passo lento, a certeza demora mais: o deslocamento tem que passar de 10 m
+        assertEquals(9_000L, andar((0..20).map { t -> fixo(t * 1_000L, norteM = 0.9 * t) }).first)
     }
 
     @Test
@@ -52,28 +63,47 @@ class CaminhadaTest {
         // O caso do dono: deitado, balançando o braço. O GPS mede a velocidade do celular (1,2 m/s), mas o ponto
         // só treme em volta do mesmo lugar
         val tremendo = listOf(0.0, 1.5, -1.0, 0.5, 2.0, -0.5, 1.0, -1.5, 0.0, 1.8)
-        val (andado, agora) = andar((0..40).map { t -> fixo(t * 1_000L, norteM = tremendo[t % tremendo.size], velocidade = 1.2f, precisaoVelocidade = 0.5f) })
+        val (andado, agora) = andar(
+            (0..60).map { t -> fixo(t * 1_000L, norteM = tremendo[t % tremendo.size], velocidade = 1.2f, precisaoVelocidade = 0.5f, rumo = (t * 97 % 360).toFloat()) },
+        )
         assertEquals(0L, andado)
         assertEquals(Movimento.PARADO, agora)
     }
 
     @Test
     fun pontoPulandoDentroDeCasaNaoConta() {
-        // Perto da janela: o ponto pula 25 m (o GPS erra), mas a velocidade medida diz que está parado
-        val pulos = (0..20).map { t -> fixo(t * 1_000L, norteM = if (t < 5) 0.0 else 25.0, precisao = 18f, velocidade = 0.1f, precisaoVelocidade = 0.3f) }
+        // Perto da janela, balançando o braço: o ponto pula 25 m (o GPS erra). O pulo recomeça a janela, e depois
+        // dele o ponto fica no mesmo lugar
+        val pulos = (0..40).map { t -> fixo(t * 1_000L, norteM = if (t < 5) 0.0 else 25.0, precisao = 18f, velocidade = 1.2f, precisaoVelocidade = 0.5f) }
         assertEquals(0L, andar(pulos).first)
-        // Sem a velocidade medida, o pulo ainda tem que passar da incerteza: 6 m com ±18 m não é sair do lugar
-        assertEquals(0L, andar((0..20).map { t -> fixo(t * 1_000L, norteM = if (t < 5) 0.0 else 6.0, precisao = 18f) }).first)
+        // Um pulo pequeno (6 m, sem a velocidade medida) não passa da incerteza (±18 m)
+        assertEquals(0L, andar((0..40).map { t -> fixo(t * 1_000L, norteM = if (t < 5) 0.0 else 6.0, precisao = 18f) }).first)
+        // O ponto escorregando 2 m/s pro norte, com o braço balançando de lado: o rumo medido não segue o caminho
+        val escorregando = (0..40).map { t ->
+            fixo(t * 1_000L, norteM = 2.0 * minOf(t, 15), precisao = 15f, velocidade = 1.2f, precisaoVelocidade = 0.5f, rumo = if (t % 2 == 0) 90f else 270f)
+        }
+        assertEquals(0L, andar(escorregando).first)
+    }
+
+    @Test
+    fun indoEVoltandoNaoConta() {
+        // 15 s pro norte e 15 s de volta, sem a velocidade do GPS: as duas metades da janela vão em sentidos opostos
+        val (andado, _) = andar((0..30).map { t -> fixo(t * 1_000L, norteM = 1.3 * (if (t <= 15) t else 30 - t)) })
+        // Só os segundos em que a janela ainda ia pro norte contam: a volta não
+        assertTrue("$andado", andado <= 10_000L)
+        // Dobrar uma esquina (90°) continua contando
+        val esquina = (0..30).map { t -> if (t <= 15) fixo(t * 1_000L, norteM = 1.3 * t) else fixo(t * 1_000L, norteM = 19.5, lesteM = 1.3 * (t - 15)) }
+        assertEquals(21_000L, andar(esquina).first)
     }
 
     @Test
     fun pertoDeParadoNaoConta() {
         // 0,4 m/s (arrastando o pé dentro de casa): não chega a 0,5 m/s
-        assertEquals(0L, andar((0..20).map { t -> fixo(t * 1_000L, norteM = 0.4 * t) }).first)
+        assertEquals(0L, andar((0..30).map { t -> fixo(t * 1_000L, norteM = 0.4 * t) }).first)
         // Andando 1,3 m/s pelo deslocamento, mas o GPS mede bem que está parado: não conta
         assertEquals(0L, andar((0..20).map { t -> fixo(t * 1_000L, norteM = 1.3 * t, velocidade = 0.2f, precisaoVelocidade = 0.3f) }).first)
         // Medida com incerteza grande (3 m/s) não vale nem pra dizer que está parado: conta o deslocamento
-        assertEquals(14_000L, andar((0..20).map { t -> fixo(t * 1_000L, norteM = 1.3 * t, velocidade = 0f, precisaoVelocidade = 3f) }).first)
+        assertEquals(11_000L, andar((0..20).map { t -> fixo(t * 1_000L, norteM = 1.3 * t, velocidade = 0f, precisaoVelocidade = 3f) }).first)
     }
 
     @Test
@@ -100,41 +130,106 @@ class CaminhadaTest {
         // Pela velocidade medida, já no primeiro fixo
         assertEquals(Movimento.RAPIDO_DEMAIS, movimento(emptyList(), fixo(1_000, velocidade = 12f))) // carro, 43 km/h
         assertEquals(0L, andar((0..20).map { t -> fixo(t * 1_000L, norteM = 5.0 * t, velocidade = 5f) }).first) // bicicleta, 18 km/h
-        // Sem a velocidade do GPS, pelo deslocamento: 15 m por segundo
-        val (andado, agora) = andar((0..20).map { t -> fixo(t * 1_000L, norteM = 15.0 * t) })
+        // Sem a velocidade do GPS, pelo deslocamento: 10 m por segundo
+        val (andado, agora) = andar((0..20).map { t -> fixo(t * 1_000L, norteM = 10.0 * t) })
         assertEquals(0L, andado)
         assertEquals(Movimento.RAPIDO_DEMAIS, agora)
     }
 
     @Test
     fun buracoNoSinalSomaNoMaximo3Segundos() {
-        // Andando 10 s, aí 6 s sem fixo (debaixo de uma marquise): o fixo depois do buraco soma só 3 s
-        val antes = (0..10).map { t -> fixo(t * 1_000L, norteM = 1.3 * t) }
-        val janela = antes.fold(emptyList<Fixo>()) { j, f -> janelaDepois(j, f) }
-        val depois = fixo(16_000, norteM = 1.3 * 16)
+        // Andando 12 s, aí 6 s sem fixo (debaixo de uma marquise): o fixo depois do buraco soma só 3 s
+        val janela = (0..12).map { t -> fixo(t * 1_000L, norteM = 1.3 * t) }.fold(emptyList<Fixo>()) { j, f -> janelaDepois(j, f) }
+        val depois = fixo(18_000, norteM = 1.3 * 18)
         assertEquals(Movimento.ANDANDO, movimento(janela, depois))
         assertEquals(3_000L, passoDeCaminhada(janela, depois))
         // Relógio pra trás não desconta nem soma
-        assertEquals(0L, passoDeCaminhada(janela, fixo(9_000, norteM = 1.3 * 9)))
+        assertEquals(0L, passoDeCaminhada(janela, fixo(11_000, norteM = 1.3 * 11)))
     }
 
     @Test
-    fun velocidadeDeVerdadePeloDeslocamento() {
+    fun velocidadeDeVerdadeEJanela() {
         val janela = (0..9).map { t -> fixo(t * 1_000L, norteM = 1.3 * t) }.fold(emptyList<Fixo>()) { j, f -> janelaDepois(j, f) }
         // A média desde o fixo mais velho da janela, não a que o GPS mede (aqui, a do braço)
         assertEquals(1.3f, velocidade(janela, fixo(10_000, norteM = 13.0, velocidade = 3f))!!, 0.01f)
         // Nos primeiros segundos, sem janela, não dá pra saber
         assertNull(velocidade(listOf(fixo(0)), fixo(3_000, norteM = 4.0)))
-        // A janela guarda só os válidos dos últimos 10 s
-        assertEquals((0..10).map { it * 1_000L }, janelaDepois(janela, fixo(10_000, norteM = 13.0)).map { it.tempoMs })
-        assertEquals((1..11).map { it * 1_000L }, janelaDepois(janelaDepois(janela, fixo(10_000)), fixo(11_000)).map { it.tempoMs })
+        // A janela guarda só os válidos dos últimos 30 s
+        val longa = (0..31).map { t -> fixo(t * 1_000L, norteM = 1.3 * t) }.fold(emptyList<Fixo>()) { j, f -> janelaDepois(j, f) }
+        assertEquals((1..31).map { it * 1_000L }, longa.map { it.tempoMs })
+        // Um pulo do ponto (30 m em 1 s) recomeça a janela dele
+        assertEquals(listOf(32_000L), janelaDepois(longa, fixo(32_000, norteM = 1.3 * 31 + 30)).map { it.tempoMs })
+        assertEquals("pulo", avaliar(longa, fixo(32_000, norteM = 1.3 * 31 + 30)).motivo)
     }
 
     @Test
     fun trilhaEmMetros() {
-        val (leste, norte) = emMetros(fixo(0), fixo(0, norteM = 30.0))
-        assertEquals(0.0, leste, 0.01)
+        val (leste, norte) = emMetros(fixo(0), fixo(0, norteM = 30.0, lesteM = 10.0))
+        assertEquals(10.0, leste, 0.05)
         assertEquals(30.0, norte, 0.05)
+    }
+
+    /**
+     * GPS de mentira, com o erro de verdade: um desvio que muda devagar (tempo de ~[tau] s, do tamanho da
+     * [precisao]) mais um tremido de [branco] m. Andando a [v] m/s, dobrando uma esquina a cada 80 s; ou deitado
+     * ([v] = null), com o braço balançando (velocidade ~1,2 m/s, rumo pra todo lado, ou nenhum) e o ponto pulando
+     * 15 a 30 m a cada minuto. 10 min, um fixo por segundo, sempre igual ([semente]).
+     */
+    private fun simular(v: Double?, precisao: Double, semente: Long, tau: Double = 20.0, branco: Double = 0.7, comRumo: Boolean = true): List<Fixo> {
+        val r = java.util.Random(semente)
+        val sigma = precisao / 1.5
+        val a = exp(-1 / tau)
+        val passo = sigma * sqrt(1 - a * a)
+        var ex = r.nextGaussian() * sigma
+        var ey = r.nextGaussian() * sigma
+        var x = 0.0
+        var y = 0.0
+        var rumo = r.nextDouble() * 360
+        var ox = 0.0
+        var oy = 0.0
+        return (0 until 600).map { t ->
+            if (v != null) {
+                if (t > 0 && t % 80 == 0) rumo = (rumo + if (r.nextBoolean()) 90 else -90 + 360) % 360
+                x += v * sin(Math.toRadians(rumo))
+                y += v * cos(Math.toRadians(rumo))
+            } else if (t > 0 && t % 60 == 0) {
+                val ang = r.nextDouble() * 2 * PI
+                val dist = 15 + r.nextDouble() * 15
+                ox = dist * cos(ang)
+                oy = dist * sin(ang)
+            }
+            val prec = (precisao * (0.8 + 0.4 * r.nextDouble())).toFloat()
+            val f = if (v != null) {
+                fixo(t * 1_000L, norteM = y + ey + r.nextGaussian() * branco, lesteM = x + ex + r.nextGaussian() * branco, precisao = prec,
+                    velocidade = maxOf(0.0, v + r.nextGaussian() * 0.15).toFloat(), precisaoVelocidade = 0.5f,
+                    rumo = ((rumo + r.nextGaussian() * 15 + 360) % 360).toFloat())
+            } else {
+                fixo(t * 1_000L, norteM = oy + ey + r.nextGaussian() * branco, lesteM = ox + ex + r.nextGaussian() * branco, precisao = prec,
+                    velocidade = maxOf(0.0, 1.2 + r.nextGaussian() * 0.3).toFloat(), precisaoVelocidade = if (r.nextInt(3) == 0) 2.5f else 0.5f,
+                    rumo = if (comRumo) (r.nextDouble() * 360).toFloat() else null)
+            }
+            ex = a * ex + r.nextGaussian() * passo
+            ey = a * ey + r.nextGaussian() * passo
+            f
+        }
+    }
+
+    @Test
+    fun naSimulacaoAndarContaEDeitadoNao() {
+        // Andando com GPS bom ou médio: conta a maior parte do tempo (os 10 min têm 600 s)
+        for ((v, precisao) in listOf(1.0 to 5.0, 1.3 to 10.0, 1.0 to 10.0)) {
+            val andado = (1..3).map { andar(simular(v, precisao, semente = it * 31L)).first }.average()
+            println("simulação: andando $v m/s com ±$precisao m conta ${andado / 6_000}%")
+            assertTrue("andando $v m/s com ±$precisao m: ${andado / 6_000}%", andado >= 0.6 * 600_000)
+        }
+        // Deitado balançando o braço, com o GPS ruim de dentro de casa, com e sem o rumo medido: quase nada
+        for (precisao in listOf(8.0, 12.0, 18.0)) {
+            for (comRumo in listOf(true, false)) {
+                val deitado = (1..3).maxOf { andar(simular(null, precisao, semente = it * 17L, comRumo = comRumo)).first }
+                println("simulação: deitado com ±$precisao m (rumo: $comRumo) conta ${deitado / 6_000.0}%")
+                assertTrue("deitado com ±$precisao m (rumo: $comRumo): ${deitado / 6_000.0}%", deitado <= 0.03 * 600_000)
+            }
+        }
     }
 
     @Test

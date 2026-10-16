@@ -162,13 +162,18 @@ class AlarmeTest {
         assertEquals(7, remedio.volumeAgora(maximo = 15, agoraMs = 60_000)) // 45% (6,75)
         assertEquals(11, remedio.volumeAgora(maximo = 15, agoraMs = 120_000)) // 75% (11,25)
         assertEquals(11, remedio.volumeAgora(maximo = 15, agoraMs = 900_000))
-        // Os avisos saem sempre no fim da subida, mesmo logo no começo dela; a voz, um pouco acima
+        // Os avisos saem sempre no fim da subida, mesmo logo no começo dela; a voz, de começo a 30%, um degrau abaixo
         val alarme = EmAndamento(Alarme(1, 7, 0), desde = 0, musica = null, volume = 2)
         assertEquals(6, alarme.volumeDosAvisos(maximo = 15)) // 40%
         assertEquals(11, remedio.volumeDosAvisos(maximo = 15)) // 75%
-        assertEquals(5, alarme.volumeDaVoz(maximo = 15)) // 30% (4,5) de começo: um degrau abaixo da música
-        assertEquals(8, alarme.volumeDaVoz(maximo = 15, fracao = 0.5f)) // o escolhido na tela principal
+        assertEquals(5, alarme.volumeDaVoz(maximo = 15)) // 30% (4,5): o degrau 5, tocando a 90% dentro dele
+        assertEquals(0.9f, alarme.ganhoDaVoz(maximo = 15), 0.001f)
+        assertEquals(6, alarme.volumeDaVoz(maximo = 15, fracao = 0.35f)) // 35% não cai no mesmo degrau dos 30%
+        assertEquals(0.875f, alarme.ganhoDaVoz(maximo = 15, fracao = 0.35f), 0.001f)
+        assertEquals(9, alarme.volumeDaVoz(maximo = 15, fracao = 0.6f)) // conta exata (9,0000004) fica no 9
+        assertEquals(1f, alarme.ganhoDaVoz(maximo = 15, fracao = 0.6f), 0.001f)
         assertEquals(1, alarme.volumeDaVoz(maximo = 15, fracao = 0.01f)) // nunca muda
+        assertEquals(15, alarme.volumeDaVoz(maximo = 15, fracao = 1f))
         // Remédio junto com um alarme de música: fica a música
         assertFalse(remedio.juntar(Alarme(3, 8, 0), agora = 10).alarme.remedio)
         assertTrue(remedio.juntar(Alarme(4, 8, 0, remedio = true), agora = 10).alarme.remedio)

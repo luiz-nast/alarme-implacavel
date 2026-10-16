@@ -626,6 +626,7 @@ class AlarmeService : Service() {
             return@Runnable
         }
         Log.i(TAG, "Missão: saudação feita, começa a câmera")
+        sirene.manterAcordado(false) // a manhã virou a missão de 40 min antes de decidir (outro alarme juntou no bom dia)
         _saudando.value = false
         handler.removeCallbacks(comecarAtividade)
         handler.removeCallbacks(anunciarInicio)
@@ -645,7 +646,7 @@ class AlarmeService : Service() {
         if (!_metadeVerificada.value && _olhado.value >= meta / 2) return iniciarVerificacao()
         marcoCompletado(antes, _olhado.value, meta)?.let { minutos ->
             Log.i(TAG, "Missão: $minutos min de câmera")
-            sirene.falar(voz?.fixa("minutos_$minutos"))
+            sirene.falarDepoisDeAcordar(voz?.fixa("minutos_$minutos"))
         }
         adiarVigia()
     }

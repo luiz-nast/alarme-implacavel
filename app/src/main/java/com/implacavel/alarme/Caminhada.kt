@@ -42,6 +42,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -133,11 +134,14 @@ fun EtapaCaminhada(
             return@DisposableEffect onDispose {}
         }
         val gps = ctx.getSystemService(LocationManager::class.java)
+        val resumo = ResumoDoGps()
         val ouvinte = object : LocationListener {
             override fun onLocationChanged(local: Location) {
                 val atual = fixoDe(local)
                 val chegou = SystemClock.elapsedRealtime()
-                val mov = movimento(janela, atual)
+                val avaliacao = avaliar(janela, atual)
+                val mov = avaliacao.movimento
+                resumo.somar(atual, avaliacao, chegou)
                 leitura = LeituraGps(mov, velocidade(janela, atual), atual.precisaoM, chegou)
                 andadoMs += passoDeCaminhada(janela, atual)
                 janela = janelaDepois(janela, atual)
@@ -245,7 +249,7 @@ private val TRILHA_TAMANHO = 180.dp
  */
 @Composable
 private fun Trilha(pontos: List<PontoDaTrilha>, modifier: Modifier) {
-    Canvas(modifier.background(Color.White.copy(alpha = 0.6f), RoundedCornerShape(16.dp))) {
+    Canvas(modifier.clip(RoundedCornerShape(16.dp)).background(Color.White.copy(alpha = 0.6f))) {
         val agora = pontos.lastOrNull() ?: return@Canvas
         val metros = pontos.map { emMetros(agora.fixo, it.fixo) }
         val minX = metros.minOf { it.first }
@@ -289,7 +293,7 @@ private fun retorno(leitura: LeituraGps?): Pair<Color, String> {
         Movimento.ANDANDO -> VerdeAndando to "Andando $v ✓"
         // Nos primeiros segundos ainda não dá pra saber se saiu do lugar
         Movimento.PARADO -> VermelhoParado to if (leitura.velocidade == null) "Conferindo se você saiu do lugar…" else "Parado: anda!"
-        Movimento.RAPIDO_DEMAIS -> VermelhoParado to "Rápido demais${if (v.isNotEmpty()) " ($v)" else ""}: só vale a pé"
+        Movimento.RAPIDO_DEMAIS -> VermelhoParado to "Rápido demais: só vale a pé"
         Movimento.IMPRECISO -> VermelhoParado to "GPS fraco${leitura.precisao?.let { " (±${it.roundToInt()} m)" }.orEmpty()}: vá pra rua, longe de prédios"
         Movimento.FALSO -> VermelhoParado to "Localização falsa não vale"
     }
@@ -305,7 +309,38 @@ private fun fixoDe(local: Location) = Fixo(
     velocidadeMs = if (local.hasSpeed()) local.speed else null,
     precisaoVelocidade = if (local.hasSpeedAccuracy()) local.speedAccuracyMetersPerSecond else null,
     falso = localizacaoFalsa(local),
+    rumo = if (local.hasBearing()) local.bearing else null,
 )
+
+/**
+ * O resumo do GPS no log a cada 30 s, pra ajustar as regras com o GPS de verdade: quantos fixos, a precisão do meio,
+ * em quantos ele mediu velocidade e rumo, e o que a regra disse de cada um ([Avaliacao.motivo]). Sem as coordenadas
+ * (privacidade): só números.
+ */
+private class ResumoDoGps {
+    private var desde = 0L
+    private val precisoes = mutableListOf<Float>()
+    private var comVelocidade = 0
+    private var comRumo = 0
+    private val motivos = mutableMapOf<String, Int>()
+
+    fun somar(fixo: Fixo, avaliacao: Avaliacao, agora: Long) {
+        if (desde == 0L) desde = agora
+        fixo.precisaoM?.let { precisoes += it }
+        if (fixo.velocidadeMs != null) comVelocidade++
+        if (fixo.rumo != null) comRumo++
+        motivos[avaliacao.motivo] = (motivos[avaliacao.motivo] ?: 0) + 1
+        if (agora - desde < 30_000) return
+        val total = motivos.values.sum()
+        val meio = precisoes.sorted().getOrNull(precisoes.size / 2)?.roundToInt()
+        Log.i(TAG, "Caminhada (30 s): $total fixos, precisão do meio ±$meio m, velocidade em $comVelocidade, rumo em $comRumo; $motivos")
+        desde = agora
+        precisoes.clear()
+        comVelocidade = 0
+        comRumo = 0
+        motivos.clear()
+    }
+}
 
 /** O fixo veio de um app de localização falsa (opção de desenvolvedor). */
 @Suppress("DEPRECATION") // isFromMockProvider, o único jeito antes do Android 12

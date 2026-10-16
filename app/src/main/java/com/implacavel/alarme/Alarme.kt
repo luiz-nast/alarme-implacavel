@@ -3,6 +3,7 @@ package com.implacavel.alarme
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.ZonedDateTime
+import kotlin.math.ceil
 import kotlin.math.roundToInt
 
 /** Volume do alarme tocando: começa em [inicio] e sobe em linha reta até [fim] em [ms] (frações do volume de alarme do celular). */
@@ -159,8 +160,15 @@ data class EmAndamento(val alarme: Alarme, val desde: Long, val musica: String?,
     /** Volume dos sons de aviso (bipe positivo, plim, parabéns): o do fim da subida (40%), sempre, mesmo que a subida não tenha acabado. */
     fun volumeDosAvisos(maximo: Int): Int = (maximo * subida.fim).roundToInt()
 
-    /** Volume da voz do app, a [fracao] do máximo (a escolhida na tela principal; de começo, [VOLUME_DA_VOZ]), no mínimo 1 degrau. */
-    fun volumeDaVoz(maximo: Int, fracao: Float = VOLUME_DA_VOZ): Int = (maximo * fracao).roundToInt().coerceAtLeast(1)
+    /**
+     * Volume da voz do app: o degrau do volume de alarme logo acima da [fracao] do máximo (a escolhida na tela
+     * principal; de começo, [VOLUME_DA_VOZ]), de 1 ao máximo. O resto vem do [ganhoDaVoz]: com 15 degraus, 30% e 35%
+     * cairiam no mesmo degrau.
+     */
+    fun volumeDaVoz(maximo: Int, fracao: Float = VOLUME_DA_VOZ): Int = ceil(maximo * fracao - 0.001).toInt().coerceIn(1, maximo)
+
+    /** Quanto da fala toca dentro do degrau de [volumeDaVoz] (de 0 a 1), pra ficar na [fracao] escolhida. */
+    fun ganhoDaVoz(maximo: Int, fracao: Float = VOLUME_DA_VOZ): Float = (maximo * fracao / volumeDaVoz(maximo, fracao)).coerceIn(0.05f, 1f)
 
     private val subida get() = if (alarme.remedio) SUBIDA_REMEDIO else SUBIDA_ALARME
 

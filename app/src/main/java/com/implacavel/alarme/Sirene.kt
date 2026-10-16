@@ -41,6 +41,8 @@ class Sirene(private val ctx: Context) {
     private var foco: AudioFocusRequest? = null
     private var acordador: MediaPlayer? = null // o quase silêncio em loop que deixa o alto-falante ligado ([manterAcordado])
     private var ondas: MediaPlayer? = null // o som de ondas do prazo pra sair de casa ([ondas])
+    private var falaAcordando: Runnable? = null // uma fala esperando a saída do alto-falante acordar ([falarDepoisDeAcordar])
+    private var acordadoPraFala = false // o [acordador] é só dessa fala: acaba com ela
     private var musica: String? = null
     private var foto: EmAndamento? = null
     private var fator = 1f // volume da música relativo ao de alarme ([volume])
@@ -73,6 +75,7 @@ class Sirene(private val ctx: Context) {
     /** Os sons de aviso saem sempre no volume do fim da subida (40%), mesmo com ela no começo; a voz, no da tela principal ([Ajustes.volumeDaVoz], 30% de começo). */
     private fun volumeDosAvisos() = foto?.volumeDosAvisos(audio.getStreamMaxVolume(AudioManager.STREAM_ALARM)) ?: 0
     private fun volumeDaVoz() = foto?.volumeDaVoz(audio.getStreamMaxVolume(AudioManager.STREAM_ALARM), Ajustes.volumeDaVoz) ?: 0
+    private fun ganhoDaVoz() = foto?.ganhoDaVoz(audio.getStreamMaxVolume(AudioManager.STREAM_ALARM), Ajustes.volumeDaVoz) ?: 1f
 
     /** Fim do bipe: o volume de alarme volta ao de antes dele. */
     private val voltarDoBipe = Runnable {
@@ -120,6 +123,9 @@ class Sirene(private val ctx: Context) {
 
     /** Cala som e vibração (um bipe no meio devolve o volume). O volume continua travado, e as outras mídias, pausadas. */
     fun calar() {
+        falaAcordando?.let(handler::removeCallbacks)
+        falaAcordando = null
+        if (acordadoPraFala) manterAcordado(false)
         player?.let {
             runCatching { it.stop() }
             it.release()
@@ -160,7 +166,28 @@ class Sirene(private val ctx: Context) {
 
     /** Toca uma vez uma fala gravada em [arquivo] (sem arquivo, só segue); [aoTerminar] quando acaba ou se não deu pra tocar. */
     fun falar(arquivo: File?, aoTerminar: () -> Unit = {}) =
-        if (arquivo == null) aoTerminar() else tocarUmaVez(Uri.fromFile(arquivo), volumeDaVoz(), aoTerminar)
+        if (arquivo == null) aoTerminar() else tocarUmaVez(Uri.fromFile(arquivo), volumeDaVoz(), aoTerminar, ganhoDaVoz())
+
+    /**
+     * Uma fala depois de um silêncio longo, fora da conversa (os avisos de 10 em 10 min da câmera): acorda a saída do
+     * alto-falante ([manterAcordado]) e fala [ACORDAR_ANTES_MS] depois, já no volume certo; com a fala, a saída volta
+     * a poder dormir. Já acordada, fala na hora.
+     */
+    fun falarDepoisDeAcordar(arquivo: File?) {
+        if (arquivo == null) return
+        if (acordador != null) return falar(arquivo)
+        falaAcordando?.let(handler::removeCallbacks)
+        manterAcordado(true)
+        acordadoPraFala = true
+        val fala = Runnable {
+            falaAcordando = null
+            falar(arquivo) {
+                if (acordadoPraFala) manterAcordado(false)
+            }
+        }
+        falaAcordando = fala
+        handler.postDelayed(fala, ACORDAR_ANTES_MS)
+    }
 
     /** O bipe positivo de "pode começar", antes da câmera. */
     fun positivo(aoTerminar: () -> Unit) = tocarUmaVez(somDoApp(R.raw.positivo), volumeDosAvisos(), aoTerminar)
@@ -181,11 +208,12 @@ class Sirene(private val ctx: Context) {
     fun comemoracao(aoTerminar: () -> Unit) = tocarUmaVez(somDoApp(R.raw.comemoracao), volumeDosAvisos(), aoTerminar)
 
     /** Fala ou som de aviso, uma vez, exatamente no [volume] (travado enquanto toca). */
-    private fun tocarUmaVez(uri: Uri, volume: Int, aoTerminar: () -> Unit) {
+    private fun tocarUmaVez(uri: Uri, volume: Int, aoTerminar: () -> Unit, ganho: Float = 1f) {
         falante?.release()
         volumeDoFalante = volume
         runCatching { audio.setStreamVolume(AudioManager.STREAM_ALARM, volume, 0) }
         falante = tocarArquivo(uri, emLoop = false)?.apply {
+            setVolume(ganho, ganho)
             setOnCompletionListener {
                 it.release()
                 if (falante === it) falante = null
@@ -203,6 +231,7 @@ class Sirene(private val ctx: Context) {
      * acabando de tocar, a saída nem chega a dormir.
      */
     fun manterAcordado(ligado: Boolean) {
+        acordadoPraFala = false
         if (!ligado) {
             acordador?.release()
             acordador = null
@@ -305,6 +334,9 @@ class Sirene(private val ctx: Context) {
     }
 
     private companion object {
+        /** Antes de uma fala depois de um silêncio longo, o tempo pra saída do alto-falante acordar ([falarDepoisDeAcordar]). */
+        const val ACORDAR_ANTES_MS = 1_500L
+
         /** Depois do som do bipe, quanto o volume ainda fica no degrau dele: folga pro som sair do alto-falante. */
         const val FOLGA_BIPE_MS = 700L
 
