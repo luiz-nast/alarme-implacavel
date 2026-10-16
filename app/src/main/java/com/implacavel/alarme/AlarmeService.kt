@@ -43,7 +43,7 @@ import java.time.LocalTime
  *   música volta. Depois dela, a câmera fica mais exigente com os olhos;
  *   daí a música só fica calada enquanto a câmera avisa ("olhando") que a pessoa
  *   olha; sem aviso, a vigia bipa a cada [AVISO_SEM_OLHAR_MS], cada vez mais alto (o último, no
- *   volume máximo do celular), e em [DESISTENCIA_MS] religa a música (o anel zera);
+ *   volume máximo do celular; no teste, 40%), e em [DESISTENCIA_MS] religa a música (o anel zera);
  * - a cada [RENOVAR_MS], empurra pra frente a retomada no AlarmManager: se o app cair, travar ou
  *   for encerrado, ou se o celular desligar, o alarme volta sozinho;
  * - se o app caiu [LIMITE_QUEDAS] vezes neste alarme, é defeito, não truque: ele volta com o
@@ -353,6 +353,9 @@ class AlarmeService : Service() {
         }
     }
 
+    /** Até quando o diagnóstico já foi gravado no arquivo (epoch, ms): o próximo serviço começa daí ([gravarDiagnostico]). */
+    private var ultimaGravacao = 0L
+
     /** O último [Progresso] gravado: só grava de novo quando muda. */
     private var progressoGravado: Progresso? = null
 
@@ -430,7 +433,6 @@ class AlarmeService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        gravarDiagnostico()
         sirene = Sirene(this)
         prepararVoz()
         processador = getSystemService(PowerManager::class.java)
@@ -453,6 +455,8 @@ class AlarmeService : Service() {
                 unregisterReceiver(this)
                 esperaDesbloqueio = null
                 if (voz == null) voz = Voz(this@AlarmeService, falasFixas())
+                // A pasta do app só existe depois do desbloqueio: o diagnóstico começa agora, com o que já houve
+                if (_tocando.value != null) gravarDiagnostico()
             }
         }.also { ContextCompat.registerReceiver(this, it, IntentFilter(Intent.ACTION_USER_UNLOCKED), ContextCompat.RECEIVER_NOT_EXPORTED) }
     }
@@ -467,16 +471,21 @@ class AlarmeService : Service() {
 
     /**
      * Enquanto um alarme toca, o log do app (só o dele, tag [TAG]) também vai pra um arquivo na pasta do app
-     * (Android/data/com.implacavel.alarme/files/diagnostico.log, girando em 4 arquivos de 1 MB). O log do Android some
-     * quando o celular reinicia; o arquivo fica, e dá pra ler depois pelo cabo:
-     *   adb pull /sdcard/Android/data/com.implacavel.alarme/files/diagnostico.log
-     * Sem as falas da conversa nem coordenadas: o log nunca teve isso.
+     * (Android/data/com.implacavel.alarme/files/diagnostico.log, mais os antigos .1 a .4, de 1 MB cada). O log do
+     * Android some quando o celular reinicia; o arquivo fica, e dá pra ler depois pelo cabo (veja o README). Começa
+     * com o que o app logou desde [ultimaGravacao] (no primeiro, o último minuto), pra não repetir linhas. Antes do
+     * primeiro desbloqueio a pasta não existe: começa no desbloqueio ([prepararVoz]). Sem as falas da conversa nem
+     * coordenadas: o log nunca teve isso.
      */
     private fun gravarDiagnostico() {
+        if (gravadorDoLog?.isAlive == true) return
         val pasta = getExternalFilesDir(null) ?: return
+        val desde = maxOf(ultimaGravacao, System.currentTimeMillis() - 60_000)
+        val inicio = java.text.SimpleDateFormat("MM-dd HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date(desde))
         gravadorDoLog = runCatching {
-            ProcessBuilder("logcat", "-v", "time", "-s", "$TAG:V", "-T", "200", "-f", File(pasta, "diagnostico.log").path, "-r", "1024", "-n", "4").start()
+            ProcessBuilder("logcat", "-v", "time", "-s", "$TAG:V", "-T", inicio, "-f", File(pasta, "diagnostico.log").path, "-r", "1024", "-n", "4").start()
         }.onFailure { Log.w(TAG, "Serviço: não deu pra gravar o diagnóstico", it) }.getOrNull()
+        ultimaGravacao = System.currentTimeMillis()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -581,11 +590,16 @@ class AlarmeService : Service() {
             if (_olhado.value < metaOlhar(alarme) / 2) _metadeVerificada.value = false
             return
         }
+        gravarDiagnostico()
         Log.i(TAG, "Serviço: tocando \"${alarme.nome}\" (missão=${alarme.missao}, remédio=${alarme.remedio}, caminhada=${alarme.caminhada}, quedas=$quedas)")
-        // O modelo começa a carregar já, com a música, pra estar pronto no fim do bom dia. Se o app já saiu sozinho
-        // neste alarme (queda, travamento ou falta de memória), pode ter sido ele: a manhã vai sem a conversa
+        // Voltando no meio deste mesmo alarme: de onde parou. Alarme novo: progresso nenhum
+        val salvo = Ajustes.progresso
+        if (salvo?.desde == em.desde) retomarProgresso(salvo) else if (salvo != null) Ajustes.progresso = null
+        // O modelo começa a carregar já, com a música, pra estar pronto no fim do bom dia (só se a manhã ainda não
+        // decidiu o caminho). Se o app já saiu sozinho neste alarme (queda, travamento ou falta de memória), pode ter
+        // sido ele: a manhã vai sem a conversa
         iaBloqueada = saiuSozinhoDesde(em.desde) || Ajustes.iaTentadaEm == em.desde
-        prepararIa(alarme, em)
+        if (caminho == null) prepararIa(alarme, em)
         telaAberta = true
         _silenciado.value = false
         _saudando.value = false
@@ -593,9 +607,11 @@ class AlarmeService : Service() {
         _metadeVerificada.value = false
         _conversa.value = null
         _caminhada.value = null
-        // Voltando no meio deste mesmo alarme: de onde parou. Alarme novo: progresso nenhum
-        val salvo = Ajustes.progresso
-        if (salvo?.desde == em.desde) retomarProgresso(salvo) else if (salvo != null) Ajustes.progresso = null
+        // O anel e a verificação do progresso retomado (os de cima zeraram a tela, não o progresso)
+        if (salvo?.desde == em.desde) {
+            _olhado.value = salvo.olhadoMs
+            _metadeVerificada.value = salvo.metadeVerificada
+        }
         sirene.tocar()
         handler.post(renovar)
     }

@@ -17,7 +17,7 @@ const val VOLUME_DA_VOZ_MIN = 0.10f
 
 /**
  * Ajustes e estado que precisam sobreviver ao processo: a música do alarme (um arquivo de áudio
- * escolhido pelo usuário no celular; o app não traz música), o volume da voz e o alarme em andamento.
+ * escolhido pelo usuário no celular; o app não traz música), o volume da voz e o alarme em andamento (e onde a missão dele está).
  * Gravado em [prefsProtegidas], como os alarmes.
  */
 object Ajustes {
@@ -29,7 +29,7 @@ object Ajustes {
 
     /**
      * O alarme que tocou e ainda não foi cumprido. Só [AlarmeService] apaga, quando a missão é
-     * cumprida. Se o processo morrer no meio (celular desligado, app encerrado ou caído), o [App]
+     * cumprida (e a saída de emergência pelo cabo, [PararPeloCabo], que só o adb chama). Se o processo morrer no meio (celular desligado, app encerrado ou caído), o [App]
      * vê isto ao voltar e religa o alarme. Gravação ilegível conta como nenhum, pra não derrubar o app.
      */
     var emAndamento: EmAndamento?

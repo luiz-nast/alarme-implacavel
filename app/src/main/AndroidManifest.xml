@@ -108,6 +108,7 @@
         <!-- Encerrar o alarme em andamento, só pelo cabo (permissão DUMP, como o TesteDaIa). Veja PararPeloCabo.kt -->
         <receiver
             android:name=".PararPeloCabo"
+            android:directBootAware="true"
             android:exported="true"
             android:permission="android.permission.DUMP" />
 

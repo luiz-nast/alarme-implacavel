@@ -166,7 +166,8 @@ class Sirene(private val ctx: Context) {
     /**
      * Bipe curto número [n] da vigia (a pessoa parou de olhar pra câmera): enquanto ele toca (e mais
      * [FOLGA_BIPE_MS]), o volume de alarme fica no degrau dele ([volumeDoBipe]), por cima da trava;
-     * depois, volta ao de antes. O último, já no volume máximo, só fica mais alto com um som mais forte.
+     * depois, volta ao de antes. O último, já no volume máximo, só fica mais alto com um som mais forte. No teste, param
+     * no volume dos avisos (40%).
      */
     fun bipe(n: Int, som: Int = if (n >= BIPES_ATE_ZERAR) R.raw.bipe_final else R.raw.bipe) {
         val maximo = audio.getStreamMaxVolume(AudioManager.STREAM_ALARM)

@@ -295,7 +295,8 @@ private fun retorno(leitura: LeituraGps?): Pair<Color, String> {
         Movimento.PARADO -> VermelhoParado to when (leitura.motivo) {
             "sem janela" -> "Conferindo se você saiu do lugar…"
             "pulo" -> "O GPS pulou: continua andando"
-            "vai e volta", "terço virou" -> "Indo e voltando não conta: anda pra frente"
+            "vai e volta" -> "Indo e voltando não conta: anda pra frente"
+            "terço virou" -> "Virou: segue reto um pouco que volta a contar"
             "rumo" -> "Balançar o celular não conta: anda pra frente"
             "curto sem rumo" -> "Conferindo (o GPS não diz a direção)…"
             else -> "Parado: anda!"
