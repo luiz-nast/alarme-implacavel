@@ -302,13 +302,13 @@ class CaminhadaTest {
     }
 
     @Test
-    fun caminhada16MinutosEPrazo4ETeste1Minuto() {
+    fun caminhada16MinutosEPrazo4ETeste8Minutos() {
         val alarme = Alarme(1, 7, 0, caminhada = true)
         val teste = Alarme.teste(caminhada = true)
         assertEquals(16 * 60_000L, metaCaminhada(alarme))
-        assertEquals(60_000L, metaCaminhada(teste))
+        assertEquals(8 * 60_000L, metaCaminhada(teste))
         assertEquals(4 * 60_000L, prazoSair(alarme))
-        assertEquals(20_000L, prazoSair(teste))
+        assertEquals(30_000L, prazoSair(teste))
     }
 
     @Test

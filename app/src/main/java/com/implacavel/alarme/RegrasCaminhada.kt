@@ -17,13 +17,13 @@ import kotlin.math.sqrt
 /** Tempo andando pra desligar o alarme com caminhada: parado, o relógio não anda. */
 const val CAMINHADA_MS = 16 * 60_000L
 
-/** No botão "Testar conversa + caminhada", só isto. */
-const val CAMINHADA_TESTE_MS = 60_000L
+/** No botão "Testar conversa + caminhada", 8 min: dá pra sentir a regra do GPS andando de verdade. */
+const val CAMINHADA_TESTE_MS = 8 * 60_000L
 
 /** Depois da conversa, o prazo pra se vestir e sair de casa: andar nele já conta, e parado não bipa. */
 const val PRAZO_SAIR_MS = 4 * 60_000L
 
-const val PRAZO_SAIR_TESTE_MS = 20_000L
+const val PRAZO_SAIR_TESTE_MS = 30_000L
 
 /**
  * Depois do prazo pra sair, parado (sem sinal de "andando") por esse tempo: um bipe ([primeiroBipeParado]);
