@@ -85,7 +85,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.ceil
-import kotlin.math.roundToInt
 
 /** Na etapa de falar a música alterna: alta pra acordar, baixa pra voz se destacar no microfone. */
 private const val MUSICA_ALTA_MS = 5_000L
@@ -737,7 +736,6 @@ private fun AnelProgresso(progresso: Float, cor: Color, modifier: Modifier) {
     }
 }
 
-private fun porcento(fracao: Float) = (fracao * 100).roundToInt()
 
 private val VermelhoAviso = Color(0xFFC62828)
 private val VerdeVez = Color(0xFF2E7D32)

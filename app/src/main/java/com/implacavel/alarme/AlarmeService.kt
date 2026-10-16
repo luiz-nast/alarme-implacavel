@@ -597,6 +597,8 @@ class AlarmeService : Service() {
         // Missão de 40 min já começada: um "conversa + caminhada" que juntar depois não muda o caminho
         if (manhaNova()) prepararManha() else if (caminho == null) caminho = CaminhoDaManha.ANTIGO
         _comCaminhada.value = manhaNova()
+        // Do bom dia ao fim da conversa, o alto-falante não dorme: a fala depois de um silêncio começaria baixinha
+        if (manhaNova() && etapa != EtapaDaManha.CAMINHADA) sirene.manterAcordado(true)
         handler.postDelayed(comecarAtividade, SAUDACAO_MAX_MS)
         val falar: (File?) -> Unit = { arquivo ->
             if (_saudando.value) sirene.falar(arquivo) { handler.postDelayed(anunciarInicio, PAUSA_DEPOIS_DA_SAUDACAO_MS) }
@@ -860,7 +862,8 @@ class AlarmeService : Service() {
         motor = null
         MotorDaConversa.liberar()
         if (escolhido == CaminhoDaManha.SO_CAMINHADA) return irPraCaminhada()
-        // A missão de 40 min, com o mesmo prazo se a voz travar
+        // A missão de 40 min, com o mesmo prazo se a voz travar (e o alto-falante como no alarme de sempre)
+        sirene.manterAcordado(false)
         handler.removeCallbacks(comecarAtividade)
         handler.postDelayed(comecarAtividade, SAUDACAO_MAX_MS)
         anunciarInicio.run()
@@ -1133,8 +1136,18 @@ class AlarmeService : Service() {
         if (prazoAte == 0L) prazoAte = agora + prazoSair(alarme)
         Log.i(TAG, "Caminhada: ${andado / 1000} s andados de ${metaCaminhada(alarme) / 1000}, ${maxOf(0L, prazoAte - agora) / 1000} s de prazo pra sair")
         _caminhada.value = Caminhada(andadoMs = andado, metaMs = metaCaminhada(alarme), prazoAte = prazoAte)
+        // No prazo pra se vestir e sair, o som de ondas; ele mesmo deixa o alto-falante ligado
+        if (agora < prazoAte) {
+            sirene.ondas(true)
+            handler.removeCallbacks(fimDasOndas)
+            handler.postDelayed(fimDasOndas, prazoAte - agora)
+        }
+        sirene.manterAcordado(false)
         adiarVigiaDaCaminhada()
     }
+
+    /** Fim do prazo pra sair: as ondas param (daí em diante, parado, só os bipes). */
+    private val fimDasOndas = Runnable { sirene.ondas(false) }
 
     /** Sinal de "andando" da etapa da caminhada: guarda o tempo andado e a contagem pro bipe recomeça. */
     private fun andou(andadoMs: Long) {
@@ -1170,6 +1183,9 @@ class AlarmeService : Service() {
     /** A música voltou: a etapa da manhã para (o que chegar depois de antes não vale), e o caminho e o progresso ficam. */
     private fun pausarManha() {
         rodadaConversa++
+        handler.removeCallbacks(fimDasOndas)
+        sirene.ondas(false)
+        sirene.manterAcordado(false)
         handler.removeCallbacks(tiqueDaConversa)
         handler.removeCallbacks(fimDaFala)
         handler.removeCallbacks(vigiaDaCaminhada)
@@ -1229,6 +1245,8 @@ class AlarmeService : Service() {
         motor?.desligar()
         motor = null
         MotorDaConversa.liberar()
+        sirene.ondas(false)
+        sirene.manterAcordado(false)
         // Cumprido já fica gravado: se o app cair na comemoração, o alarme não volta
         volumeAoFim = Ajustes.emAndamento?.volume
         Ajustes.volumeParaDevolver = volumeAoFim

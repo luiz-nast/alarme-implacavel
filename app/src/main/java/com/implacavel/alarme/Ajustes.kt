@@ -12,10 +12,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
 
+/** A voz do app nunca fica abaixo disso: muda, a missão perderia as falas. */
+const val VOLUME_DA_VOZ_MIN = 0.10f
+
 /**
  * Ajustes e estado que precisam sobreviver ao processo: a música do alarme (um arquivo de áudio
- * escolhido pelo usuário no celular; o app não traz música) e o alarme em andamento. Gravado em
- * [prefsProtegidas], como os alarmes.
+ * escolhido pelo usuário no celular; o app não traz música), o volume da voz e o alarme em andamento.
+ * Gravado em [prefsProtegidas], como os alarmes.
  */
 object Ajustes {
     data class Musica(val uri: String, val nome: String)
@@ -53,10 +56,23 @@ object Ajustes {
         get() = prefs.getLong("iaTentadaEm", 0L)
         set(valor) = prefs.edit(commit = true) { putLong("iaTentadaEm", valor) }
 
+    private val _volumeDaVoz = MutableStateFlow(VOLUME_DA_VOZ)
+
+    /** Volume da voz do app, de 0,1 a 1 do volume de alarme, escolhido na tela principal (Ajustes ▾). De começo, [VOLUME_DA_VOZ]. */
+    val volumeDaVozAgora: StateFlow<Float> = _volumeDaVoz.asStateFlow()
+    val volumeDaVoz: Float get() = _volumeDaVoz.value
+
+    fun escolherVolumeDaVoz(fracao: Float) {
+        val valor = fracao.coerceIn(VOLUME_DA_VOZ_MIN, 1f)
+        prefs.edit { putFloat("volumeDaVoz", valor) }
+        _volumeDaVoz.value = valor
+    }
+
     /** Chamado uma vez em [App.onCreate]. */
     fun carregar(ctx: Context) {
         prefs = ctx.prefsProtegidas("ajustes")
         _musica.value = prefs.getString("musicaUri", null)?.let { Musica(it, prefs.getString("musicaNome", null) ?: "Música") }
+        _volumeDaVoz.value = prefs.getFloat("volumeDaVoz", VOLUME_DA_VOZ).coerceIn(VOLUME_DA_VOZ_MIN, 1f)
     }
 
     /** Guarda a música e a permissão de lê-la depois, que sobrevive a reinícios do celular. */

@@ -21,18 +21,21 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -72,6 +75,17 @@ private val VermelhoParado = Color(0xFFC62828)
 /** O último fixo do GPS como a tela mostra: o [movimento], a [velocidade] (m/s), a [precisao] (m) e [quando] chegou (SystemClock.elapsedRealtime). */
 private data class LeituraGps(val movimento: Movimento, val velocidade: Float?, val precisao: Float?, val quando: Long)
 
+/** Um ponto da trilha na tela: o fixo válido e se ele contou como andando (verde) ou não (cinza). */
+private data class PontoDaTrilha(val fixo: Fixo, val andando: Boolean)
+
+/** Os pontos da trilha que a tela guarda: os últimos 10 min (um fixo por segundo). */
+private const val TRILHA_MAX = 600
+
+/** A trilha mostra no mínimo um quadrado deste lado, em metros: parado, os pontos ficam embolados no meio. */
+private const val TRILHA_LADO_MIN_M = 40.0
+
+private val CinzaParado = Color(0xFF9E9E9E)
+
 /**
  * Etapa da caminhada: um anel que enche com o tempo andando a pé ([passoDeCaminhada], um fixo do GPS
  * por segundo) até somar [metaMs], começando de [andadoInicialMs] (o que o serviço já guardou: a tela
@@ -106,7 +120,8 @@ fun EtapaCaminhada(
     // Continua do que o serviço guardou; parado, o tempo andado fica onde está e nunca desce
     var andadoMs by remember { mutableLongStateOf(andadoInicialMs) }
     var leitura by remember { mutableStateOf<LeituraGps?>(null) }
-    var anterior by remember { mutableStateOf<Fixo?>(null) } // o último fixo válido: o passo é medido a partir dele
+    var janela by remember { mutableStateOf(emptyList<Fixo>()) } // os fixos válidos dos últimos 10 s: o deslocamento é medido neles
+    val trilha = remember { mutableStateListOf<PontoDaTrilha>() }
     var ligada by remember { mutableStateOf(gpsLigado(ctx)) }
     var permitida by remember { mutableStateOf(Poder.LOCALIZACAO.liberado(ctx)) }
     var agora by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
@@ -122,9 +137,14 @@ fun EtapaCaminhada(
             override fun onLocationChanged(local: Location) {
                 val atual = fixoDe(local)
                 val chegou = SystemClock.elapsedRealtime()
-                leitura = LeituraGps(movimento(anterior, atual), velocidade(anterior, atual), atual.precisaoM, chegou)
-                andadoMs += passoDeCaminhada(anterior, atual)
-                if (fixoValido(atual)) anterior = atual
+                val mov = movimento(janela, atual)
+                leitura = LeituraGps(mov, velocidade(janela, atual), atual.precisaoM, chegou)
+                andadoMs += passoDeCaminhada(janela, atual)
+                janela = janelaDepois(janela, atual)
+                if (fixoValido(atual)) {
+                    trilha += PontoDaTrilha(atual, andando = mov == Movimento.ANDANDO)
+                    if (trilha.size > TRILHA_MAX) trilha.removeAt(0)
+                }
             }
 
             // Antes do Android 11 estes três não têm corpo pronto: sem eles, o app cai quando a localização liga ou desliga
@@ -208,8 +228,47 @@ fun EtapaCaminhada(
             Spacer(Modifier.height(12.dp))
             BotaoGrande("LIGAR LOCALIZAÇÃO", { desbloquear(activity) { abrirLocalizacao(ctx) } }, fundoClaro = true)
         }
-        Spacer(Modifier.height(8.dp))
-        Text("Só conta andando a pé, na rua", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 15.sp)
+        Spacer(Modifier.height(12.dp))
+        Trilha(trilha, Modifier.size(TRILHA_TAMANHO))
+        Text("Sua trilha: verde onde contou", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 14.sp)
+        Spacer(Modifier.height(4.dp))
+        Text("Só conta saindo do lugar, a pé, na rua", color = VinhoAlarme.copy(alpha = 0.7f), fontSize = 15.sp)
+    }
+}
+
+private val TRILHA_TAMANHO = 180.dp
+
+/**
+ * A trilha da caminhada vista de cima (norte pra cima), na escala que cabe tudo ([TRILHA_LADO_MIN_M] no mínimo):
+ * verde onde contou como andando, cinza onde não; no ponto de agora, o círculo da incerteza do GPS. Parado
+ * balançando o braço, os pontos ficam embolados num lugar só.
+ */
+@Composable
+private fun Trilha(pontos: List<PontoDaTrilha>, modifier: Modifier) {
+    Canvas(modifier.background(Color.White.copy(alpha = 0.6f), RoundedCornerShape(16.dp))) {
+        val agora = pontos.lastOrNull() ?: return@Canvas
+        val metros = pontos.map { emMetros(agora.fixo, it.fixo) }
+        val minX = metros.minOf { it.first }
+        val maxX = metros.maxOf { it.first }
+        val minY = metros.minOf { it.second }
+        val maxY = metros.maxOf { it.second }
+        val lado = maxOf(TRILHA_LADO_MIN_M, (maxX - minX) * 1.2, (maxY - minY) * 1.2)
+        val pxPorM = (minOf(size.width, size.height) / lado).toFloat()
+        val meioX = (minX + maxX) / 2
+        val meioY = (minY + maxY) / 2
+        fun ponto(m: Pair<Double, Double>) = Offset(
+            size.width / 2 + ((m.first - meioX) * pxPorM).toFloat(),
+            size.height / 2 - ((m.second - meioY) * pxPorM).toFloat(), // norte pra cima
+        )
+        for (i in 1 until pontos.size) {
+            drawLine(
+                if (pontos[i].andando) VerdeAndando else CinzaParado, ponto(metros[i - 1]), ponto(metros[i]),
+                strokeWidth = 4.dp.toPx(), cap = StrokeCap.Round,
+            )
+        }
+        val aqui = ponto(metros.last())
+        agora.fixo.precisaoM?.let { drawCircle(VinhoAlarme.copy(alpha = 0.12f), radius = it * pxPorM, center = aqui) }
+        drawCircle(VinhoAlarme, radius = 6.dp.toPx(), center = aqui)
     }
 }
 
@@ -228,8 +287,9 @@ private fun retorno(leitura: LeituraGps?): Pair<Color, String> {
     val v = leitura.velocidade?.let(::textoDaVelocidade).orEmpty()
     return when (leitura.movimento) {
         Movimento.ANDANDO -> VerdeAndando to "Andando $v ✓"
-        Movimento.PARADO -> VermelhoParado to "Parado: anda!"
-        Movimento.RAPIDO_DEMAIS -> VermelhoParado to "Rápido demais ($v): só vale a pé"
+        // Nos primeiros segundos ainda não dá pra saber se saiu do lugar
+        Movimento.PARADO -> VermelhoParado to if (leitura.velocidade == null) "Conferindo se você saiu do lugar…" else "Parado: anda!"
+        Movimento.RAPIDO_DEMAIS -> VermelhoParado to "Rápido demais${if (v.isNotEmpty()) " ($v)" else ""}: só vale a pé"
         Movimento.IMPRECISO -> VermelhoParado to "GPS fraco${leitura.precisao?.let { " (±${it.roundToInt()} m)" }.orEmpty()}: vá pra rua, longe de prédios"
         Movimento.FALSO -> VermelhoParado to "Localização falsa não vale"
     }

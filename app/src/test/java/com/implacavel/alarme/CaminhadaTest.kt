@@ -22,77 +22,119 @@ class CaminhadaTest {
         falso: Boolean = false,
     ) = Fixo(tempoMs, -23.55 + norteM * metroEmGraus, -46.63, precisao, velocidade, precisaoVelocidade, falso)
 
-    @Test
-    fun andandoAPeConta() {
-        val antes = fixo(0)
-        assertEquals(Movimento.ANDANDO, movimento(antes, fixo(1_000, velocidade = 1.3f)))
-        assertEquals(1_000L, passoDeCaminhada(antes, fixo(1_000, velocidade = 1.3f)))
-        assertEquals(1_000L, passoDeCaminhada(antes, fixo(1_000, velocidade = 4.0f))) // corrida leve
-        assertEquals(1_000L, passoDeCaminhada(antes, fixo(1_000, velocidade = 0.5f))) // passo lento
-        // Parado, a velocidade do GPS treme perto de zero
-        assertEquals(Movimento.PARADO, movimento(antes, fixo(1_000, velocidade = 0.3f)))
-        assertEquals(0L, passoDeCaminhada(antes, fixo(1_000, velocidade = 0.3f)))
-        // O primeiro fixo não tem de onde medir o tempo
-        assertEquals(0L, passoDeCaminhada(null, fixo(1_000, velocidade = 1.3f)))
+    /** Passa os [fixos] pela regra, um por um, como a tela: o tempo somado andando e o movimento do último. */
+    private fun andar(fixos: List<Fixo>): Pair<Long, Movimento> {
+        var janela = emptyList<Fixo>()
+        var soma = 0L
+        var ultimo = Movimento.PARADO
+        for (f in fixos) {
+            ultimo = movimento(janela, f)
+            soma += passoDeCaminhada(janela, f)
+            janela = janelaDepois(janela, f)
+        }
+        return soma to ultimo
     }
 
     @Test
-    fun soOTempoAndandoSoma() {
-        // Um fixo por segundo: 10 s andando, 5 s parado no farol, mais 5 s andando
-        val fixos = (0..20).map { t -> fixo(t * 1_000L, velocidade = if (t in 11..15) 0f else 1.3f) }
-        val andado = fixos.zipWithNext { anterior, atual -> passoDeCaminhada(anterior, atual) }.sum()
-        assertEquals(15_000L, andado)
+    fun andarDeVerdadeConta() {
+        // 20 s a 1,3 m/s, um fixo por segundo: os 7 primeiros são pra ter certeza de que saiu do lugar
+        val (andado, agora) = andar((0..20).map { t -> fixo(t * 1_000L, norteM = 1.3 * t, velocidade = 1.3f) })
+        assertEquals(14_000L, andado)
+        assertEquals(Movimento.ANDANDO, agora)
+        // Corrida leve e passo lento (sem a velocidade do GPS, só pelo deslocamento) também
+        assertEquals(14_000L, andar((0..20).map { t -> fixo(t * 1_000L, norteM = 3.5 * t) }).first)
+        // No passo lento, a certeza demora 2 s a mais (o deslocamento tem que passar da incerteza, 8 m)
+        assertEquals(12_000L, andar((0..20).map { t -> fixo(t * 1_000L, norteM = 0.9 * t) }).first)
+    }
+
+    @Test
+    fun bracoBalancandoNaCamaNaoConta() {
+        // O caso do dono: deitado, balançando o braço. O GPS mede a velocidade do celular (1,2 m/s), mas o ponto
+        // só treme em volta do mesmo lugar
+        val tremendo = listOf(0.0, 1.5, -1.0, 0.5, 2.0, -0.5, 1.0, -1.5, 0.0, 1.8)
+        val (andado, agora) = andar((0..40).map { t -> fixo(t * 1_000L, norteM = tremendo[t % tremendo.size], velocidade = 1.2f, precisaoVelocidade = 0.5f) })
+        assertEquals(0L, andado)
+        assertEquals(Movimento.PARADO, agora)
+    }
+
+    @Test
+    fun pontoPulandoDentroDeCasaNaoConta() {
+        // Perto da janela: o ponto pula 25 m (o GPS erra), mas a velocidade medida diz que está parado
+        val pulos = (0..20).map { t -> fixo(t * 1_000L, norteM = if (t < 5) 0.0 else 25.0, precisao = 18f, velocidade = 0.1f, precisaoVelocidade = 0.3f) }
+        assertEquals(0L, andar(pulos).first)
+        // Sem a velocidade medida, o pulo ainda tem que passar da incerteza: 6 m com ±18 m não é sair do lugar
+        assertEquals(0L, andar((0..20).map { t -> fixo(t * 1_000L, norteM = if (t < 5) 0.0 else 6.0, precisao = 18f) }).first)
+    }
+
+    @Test
+    fun pertoDeParadoNaoConta() {
+        // 0,4 m/s (arrastando o pé dentro de casa): não chega a 0,5 m/s
+        assertEquals(0L, andar((0..20).map { t -> fixo(t * 1_000L, norteM = 0.4 * t) }).first)
+        // Andando 1,3 m/s pelo deslocamento, mas o GPS mede bem que está parado: não conta
+        assertEquals(0L, andar((0..20).map { t -> fixo(t * 1_000L, norteM = 1.3 * t, velocidade = 0.2f, precisaoVelocidade = 0.3f) }).first)
+        // Medida com incerteza grande (3 m/s) não vale nem pra dizer que está parado: conta o deslocamento
+        assertEquals(14_000L, andar((0..20).map { t -> fixo(t * 1_000L, norteM = 1.3 * t, velocidade = 0f, precisaoVelocidade = 3f) }).first)
     }
 
     @Test
     fun localizacaoFalsaNaoConta() {
         val atual = fixo(1_000, velocidade = 1.3f, falso = true)
         assertFalse(fixoValido(atual))
-        assertEquals(Movimento.FALSO, movimento(fixo(0), atual))
-        assertEquals(0L, passoDeCaminhada(fixo(0), atual))
+        assertEquals(Movimento.FALSO, movimento(listOf(fixo(0)), atual))
+        assertEquals(0L, passoDeCaminhada(listOf(fixo(0)), atual))
+        assertTrue(janelaDepois(emptyList(), atual).isEmpty())
     }
 
     @Test
     fun gpsImprecisoNaoConta() {
         // Dentro de casa ou entre prédios o GPS erra dezenas de metros
-        assertEquals(Movimento.IMPRECISO, movimento(fixo(0), fixo(1_000, precisao = 40f, velocidade = 1.3f)))
-        assertEquals(0L, passoDeCaminhada(fixo(0), fixo(1_000, precisao = 25.5f, velocidade = 1.3f)))
-        assertEquals(0L, passoDeCaminhada(fixo(0), fixo(1_000, precisao = null, velocidade = 1.3f))) // sem precisão
-        assertEquals(1_000L, passoDeCaminhada(fixo(0), fixo(1_000, precisao = 25f, velocidade = 1.3f))) // no limite, vale
-        assertTrue(fixoValido(fixo(0, precisao = 25f)))
+        assertEquals(Movimento.IMPRECISO, movimento(emptyList(), fixo(1_000, precisao = 25f, velocidade = 1.3f)))
+        assertEquals(Movimento.IMPRECISO, movimento(emptyList(), fixo(1_000, precisao = null, velocidade = 1.3f))) // sem precisão
+        assertTrue(fixoValido(fixo(0, precisao = 20f))) // no limite, vale
+        assertFalse(fixoValido(fixo(0, precisao = 20.5f)))
+        assertEquals(0L, andar((0..20).map { t -> fixo(t * 1_000L, norteM = 1.3 * t, precisao = 30f, velocidade = 1.3f) }).first)
     }
 
     @Test
     fun deCarroOuBicicletaNaoConta() {
-        assertEquals(Movimento.RAPIDO_DEMAIS, movimento(fixo(0), fixo(1_000, velocidade = 12f)))
-        assertEquals(0L, passoDeCaminhada(fixo(0), fixo(1_000, velocidade = 12f))) // carro, 43 km/h
-        assertEquals(0L, passoDeCaminhada(fixo(0), fixo(1_000, velocidade = 5f))) // bicicleta, 18 km/h
-        // Sem a velocidade do GPS, pelo deslocamento: 15 m em 1 s
-        assertEquals(Movimento.RAPIDO_DEMAIS, movimento(fixo(0), fixo(1_000, norteM = 15.0)))
+        // Pela velocidade medida, já no primeiro fixo
+        assertEquals(Movimento.RAPIDO_DEMAIS, movimento(emptyList(), fixo(1_000, velocidade = 12f))) // carro, 43 km/h
+        assertEquals(0L, andar((0..20).map { t -> fixo(t * 1_000L, norteM = 5.0 * t, velocidade = 5f) }).first) // bicicleta, 18 km/h
+        // Sem a velocidade do GPS, pelo deslocamento: 15 m por segundo
+        val (andado, agora) = andar((0..20).map { t -> fixo(t * 1_000L, norteM = 15.0 * t) })
+        assertEquals(0L, andado)
+        assertEquals(Movimento.RAPIDO_DEMAIS, agora)
     }
 
     @Test
     fun buracoNoSinalSomaNoMaximo3Segundos() {
-        assertEquals(3_000L, passoDeCaminhada(fixo(0), fixo(10_000, velocidade = 1.3f)))
-        assertEquals(2_500L, passoDeCaminhada(fixo(0), fixo(2_500, velocidade = 1.3f)))
-        assertEquals(0L, passoDeCaminhada(fixo(5_000), fixo(4_000, velocidade = 1.3f))) // relógio pra trás não desconta
+        // Andando 10 s, aí 6 s sem fixo (debaixo de uma marquise): o fixo depois do buraco soma só 3 s
+        val antes = (0..10).map { t -> fixo(t * 1_000L, norteM = 1.3 * t) }
+        val janela = antes.fold(emptyList<Fixo>()) { j, f -> janelaDepois(j, f) }
+        val depois = fixo(16_000, norteM = 1.3 * 16)
+        assertEquals(Movimento.ANDANDO, movimento(janela, depois))
+        assertEquals(3_000L, passoDeCaminhada(janela, depois))
+        // Relógio pra trás não desconta nem soma
+        assertEquals(0L, passoDeCaminhada(janela, fixo(9_000, norteM = 1.3 * 9)))
     }
 
     @Test
-    fun semVelocidadeDoGpsUsaODeslocamento() {
-        // 1,3 m em 1 s, sem velocidade medida: andando
-        assertEquals(1.3f, velocidade(fixo(0), fixo(1_000, norteM = 1.3))!!, 0.01f)
-        assertEquals(Movimento.ANDANDO, movimento(fixo(0), fixo(1_000, norteM = 1.3)))
-        assertEquals(1_000L, passoDeCaminhada(fixo(0), fixo(1_000, norteM = 1.3)))
-        // No mesmo lugar: parado
-        assertEquals(0L, passoDeCaminhada(fixo(0), fixo(1_000)))
-        // Velocidade medida com incerteza grande (3 m/s) não vale: conta o deslocamento
-        assertEquals(1_000L, passoDeCaminhada(fixo(0), fixo(1_000, norteM = 1.3, velocidade = 0f, precisaoVelocidade = 3f)))
-        // A medida confiável vale mais que o deslocamento (parado, o ponto do GPS treme uns metros)
-        assertEquals(0L, passoDeCaminhada(fixo(0), fixo(1_000, norteM = 2.0, velocidade = 0.1f, precisaoVelocidade = 0.4f)))
-        // Sem velocidade e sem anterior, não dá pra saber; com o mesmo tempo, também não
-        assertNull(velocidade(null, fixo(1_000)))
-        assertNull(velocidade(fixo(1_000), fixo(1_000, norteM = 1.3)))
+    fun velocidadeDeVerdadePeloDeslocamento() {
+        val janela = (0..9).map { t -> fixo(t * 1_000L, norteM = 1.3 * t) }.fold(emptyList<Fixo>()) { j, f -> janelaDepois(j, f) }
+        // A média desde o fixo mais velho da janela, não a que o GPS mede (aqui, a do braço)
+        assertEquals(1.3f, velocidade(janela, fixo(10_000, norteM = 13.0, velocidade = 3f))!!, 0.01f)
+        // Nos primeiros segundos, sem janela, não dá pra saber
+        assertNull(velocidade(listOf(fixo(0)), fixo(3_000, norteM = 4.0)))
+        // A janela guarda só os válidos dos últimos 10 s
+        assertEquals((0..10).map { it * 1_000L }, janelaDepois(janela, fixo(10_000, norteM = 13.0)).map { it.tempoMs })
+        assertEquals((1..11).map { it * 1_000L }, janelaDepois(janelaDepois(janela, fixo(10_000)), fixo(11_000)).map { it.tempoMs })
+    }
+
+    @Test
+    fun trilhaEmMetros() {
+        val (leste, norte) = emMetros(fixo(0), fixo(0, norteM = 30.0))
+        assertEquals(0.0, leste, 0.01)
+        assertEquals(30.0, norte, 0.05)
     }
 
     @Test

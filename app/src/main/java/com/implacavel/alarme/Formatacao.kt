@@ -5,6 +5,7 @@ import java.time.Duration
 import java.time.LocalTime
 import java.time.ZonedDateTime
 import java.util.Locale
+import kotlin.math.roundToInt
 
 /** Ordem dos dias na tela: domingo primeiro, como nos calendários brasileiros. */
 val ORDEM_DIAS = listOf(7, 1, 2, 3, 4, 5, 6)
@@ -45,3 +46,6 @@ fun tempoRestante(ms: Long): String {
     val s = ((ms + 999) / 1000).coerceAtLeast(0)
     return if (s >= 60) String.format(Locale.ROOT, "%d:%02d", s / 60, s % 60) else "$s s"
 }
+
+/** Uma fração (0,3) em porcentagem inteira pra tela (30). */
+fun porcento(fracao: Float): Int = (fracao * 100).roundToInt()

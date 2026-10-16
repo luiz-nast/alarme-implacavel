@@ -29,15 +29,28 @@ const val PARADO_MS = 10_000L
 
 const val ENTRE_BIPES_PARADO_MS = 3_000L
 
-/** Fixo com incerteza maior que isso (dentro de casa, entre prédios) não conta. */
-const val PRECISAO_MAX_M = 25f
+/** Fixo com incerteza maior que isso (dentro de casa, entre prédios) não conta. Era 25 m: na cama, perto da janela, passava. */
+const val PRECISAO_MAX_M = 20f
 
-/** Velocidade medida pelo GPS com incerteza maior que isso não vale: a velocidade sai do deslocamento. */
+/** Velocidade medida pelo GPS com incerteza maior que isso não vale (nem pra dizer que está parado). */
 private const val PRECISAO_VELOCIDADE_MAX = 1.5f
 
 /** Andando ou correndo a pé: de 0,5 m/s (passo lento) a 4 m/s (corrida leve). Mais rápido é carro, ônibus ou bicicleta. */
 private const val VELOCIDADE_MIN = 0.5f
 private const val VELOCIDADE_MAX = 4.0f
+
+/**
+ * Andar é sair do lugar: o deslocamento é medido entre o fixo de agora e o mais velho dos últimos [JANELA_MS]
+ * ([janelaDepois]), e só vale com pelo menos [JANELA_MIN_MS] entre os dois (antes disso, ainda não dá pra saber).
+ */
+const val JANELA_MS = 10_000L
+private const val JANELA_MIN_MS = 7_000L
+
+/**
+ * Na janela, o deslocamento tem que passar disto e da metade da incerteza somada dos dois fixos: o ponto do GPS
+ * parado treme uns metros (dentro de casa, bem mais), e o braço balançando não sai do lugar.
+ */
+private const val DESLOCAMENTO_MIN_M = 6.0
 
 /** O máximo que um fixo soma: um buraco no sinal não vira minutos andados. */
 private const val PASSO_MAX_MS = 3_000L
@@ -83,37 +96,68 @@ fun distanciaM(a: Fixo, b: Fixo): Double {
 }
 
 /**
- * Velocidade no [atual], em m/s: a medida pelo GPS, se a incerteza dela é de até 1,5 m/s (ou ele não
- * disse a incerteza); senão, o deslocamento desde o [anterior] (o último fixo válido) dividido pelo
- * tempo. Null sem como saber (sem velocidade boa e sem anterior).
+ * Onde [fixo] fica, em metros, a leste e ao norte da [origem] (o chão como um plano: de sobra pra uma caminhada).
+ * É o que a tela usa pra desenhar a trilha.
  */
-fun velocidade(anterior: Fixo?, atual: Fixo): Float? {
-    val medida = atual.velocidadeMs
-    if (medida != null && (atual.precisaoVelocidade == null || atual.precisaoVelocidade <= PRECISAO_VELOCIDADE_MAX)) return medida
-    if (anterior == null) return null
-    val segundos = (atual.tempoMs - anterior.tempoMs) / 1000.0
-    return if (segundos > 0) (distanciaM(anterior, atual) / segundos).toFloat() else null
+fun emMetros(origem: Fixo, fixo: Fixo): Pair<Double, Double> {
+    val leste = Math.toRadians(fixo.longitude - origem.longitude) * RAIO_DA_TERRA_M * cos(Math.toRadians(origem.latitude))
+    val norte = Math.toRadians(fixo.latitude - origem.latitude) * RAIO_DA_TERRA_M
+    return leste to norte
 }
 
-/** O [atual] lido pra caminhada, com o [anterior] (o último fixo válido; null se nenhum ainda). */
-fun movimento(anterior: Fixo?, atual: Fixo): Movimento {
+/**
+ * Os fixos válidos dos últimos [JANELA_MS] depois do [atual] (ele entra se for válido), do mais velho ao mais
+ * novo: é a [janela] que [movimento] e [passoDeCaminhada] recebem no próximo fixo.
+ */
+fun janelaDepois(janela: List<Fixo>, atual: Fixo): List<Fixo> =
+    (if (fixoValido(atual)) janela + atual else janela).filter { atual.tempoMs - it.tempoMs in 0..JANELA_MS }
+
+/** O fixo de onde o deslocamento é medido: o mais velho da [janela] de pelo menos [JANELA_MIN_MS] antes do [atual]. Null sem nenhum. */
+private fun inicioDaJanela(janela: List<Fixo>, atual: Fixo): Fixo? =
+    janela.firstOrNull { atual.tempoMs - it.tempoMs in JANELA_MIN_MS..JANELA_MS }
+
+/**
+ * Velocidade de verdade no [atual], em m/s: o deslocamento em linha reta desde o começo da [janela] dividido pelo
+ * tempo. Null sem janela ainda (os primeiros segundos). A velocidade que o GPS mede sozinha não serve pra isso: ela
+ * é a do celular, e o celular balançando na mão, com a pessoa parada na cama, passa de 1 m/s.
+ */
+fun velocidade(janela: List<Fixo>, atual: Fixo): Float? {
+    val inicio = inicioDaJanela(janela, atual) ?: return null
+    return (distanciaM(inicio, atual) / ((atual.tempoMs - inicio.tempoMs) / 1000.0)).toFloat()
+}
+
+/**
+ * O [atual] lido pra caminhada, com a [janela] (os fixos válidos antes dele, de [janelaDepois]). Andando = saiu do
+ * lugar: na janela, o deslocamento passa de [DESLOCAMENTO_MIN_M] e da metade da incerteza somada, a [velocidade]
+ * de verdade fica entre 0,5 e 4 m/s, e a velocidade medida pelo GPS (se ele mediu bem) não diz que está parado
+ * (um pulo do ponto dentro de casa não é andar). Mais rápido que 4 m/s, por qualquer das duas: carro ou bicicleta.
+ */
+fun movimento(janela: List<Fixo>, atual: Fixo): Movimento {
     if (atual.falso) return Movimento.FALSO
     if (!fixoValido(atual)) return Movimento.IMPRECISO
-    val v = velocidade(anterior, atual) ?: return Movimento.PARADO
+    val medida = atual.velocidadeMs?.takeIf { atual.precisaoVelocidade == null || atual.precisaoVelocidade <= PRECISAO_VELOCIDADE_MAX }
+    if (medida != null && medida > VELOCIDADE_MAX) return Movimento.RAPIDO_DEMAIS
+    val inicio = inicioDaJanela(janela, atual) ?: return Movimento.PARADO
+    val deslocamento = distanciaM(inicio, atual)
+    val real = (deslocamento / ((atual.tempoMs - inicio.tempoMs) / 1000.0)).toFloat()
+    val incerteza = ((inicio.precisaoM ?: PRECISAO_MAX_M) + (atual.precisaoM ?: PRECISAO_MAX_M)) / 2.0
     return when {
-        v > VELOCIDADE_MAX -> Movimento.RAPIDO_DEMAIS
-        v >= VELOCIDADE_MIN -> Movimento.ANDANDO
-        else -> Movimento.PARADO
+        real > VELOCIDADE_MAX -> Movimento.RAPIDO_DEMAIS
+        real < VELOCIDADE_MIN || deslocamento < maxOf(DESLOCAMENTO_MIN_M, incerteza) -> Movimento.PARADO
+        medida != null && medida < VELOCIDADE_MIN -> Movimento.PARADO
+        else -> Movimento.ANDANDO
     }
 }
 
 /**
- * Quanto o [atual] soma na caminhada, em ms: com a pessoa andando a pé ([movimento]), o tempo desde o
- * [anterior] (o último fixo válido), até 3 s; senão, 0. No primeiro fixo válido (sem [anterior]), 0.
- * Quem chama guarda como [anterior] só os fixos que passam em [fixoValido].
+ * Quanto o [atual] soma na caminhada, em ms: com a pessoa andando a pé ([movimento]), o tempo desde o último fixo
+ * da [janela], até 3 s; senão, 0. Os primeiros [JANELA_MIN_MS] de uma caminhada (e de cada volta depois de parar)
+ * não somam: é o tempo de ter certeza de que ela saiu do lugar.
  */
-fun passoDeCaminhada(anterior: Fixo?, atual: Fixo): Long =
-    if (anterior == null || movimento(anterior, atual) != Movimento.ANDANDO) 0 else (atual.tempoMs - anterior.tempoMs).coerceIn(0, PASSO_MAX_MS)
+fun passoDeCaminhada(janela: List<Fixo>, atual: Fixo): Long {
+    val ultimo = janela.lastOrNull() ?: return 0
+    return if (movimento(janela, atual) != Movimento.ANDANDO) 0 else (atual.tempoMs - ultimo.tempoMs).coerceIn(0, PASSO_MAX_MS)
+}
 
 /**
  * Quando (SystemClock.elapsedRealtime) toca o 1º bipe de parado: [PARADO_MS] depois do último sinal de

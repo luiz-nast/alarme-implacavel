@@ -57,6 +57,7 @@ private fun TelaPrincipal() {
     val alarmes by Alarmes.lista.collectAsStateWithLifecycle()
     val tocando by AlarmeService.tocando.collectAsStateWithLifecycle()
     val musica by Ajustes.musica.collectAsStateWithLifecycle()
+    val volumeDaVoz by Ajustes.volumeDaVozAgora.collectAsStateWithLifecycle()
     val agora = agoraACada(15_000) // pros textos "toca em 9 h 12 min"
     var editando by remember { mutableStateOf<Alarme?>(null) }
 
@@ -144,6 +145,7 @@ private fun TelaPrincipal() {
                     },
                 )
             }
+            item { SecaoAjustes(volumeDaVoz, Ajustes::escolherVolumeDaVoz) }
             items(alarmes, key = { it.id }) { alarme ->
                 CartaoAlarme(
                     alarme = alarme,

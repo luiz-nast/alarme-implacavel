@@ -166,7 +166,9 @@ class AlarmeTest {
         val alarme = EmAndamento(Alarme(1, 7, 0), desde = 0, musica = null, volume = 2)
         assertEquals(6, alarme.volumeDosAvisos(maximo = 15)) // 40%
         assertEquals(11, remedio.volumeDosAvisos(maximo = 15)) // 75%
-        assertEquals(7, alarme.volumeDaVoz(maximo = 15)) // 45% (6,75): um degrau acima da música
+        assertEquals(5, alarme.volumeDaVoz(maximo = 15)) // 30% (4,5) de começo: um degrau abaixo da música
+        assertEquals(8, alarme.volumeDaVoz(maximo = 15, fracao = 0.5f)) // o escolhido na tela principal
+        assertEquals(1, alarme.volumeDaVoz(maximo = 15, fracao = 0.01f)) // nunca muda
         // Remédio junto com um alarme de música: fica a música
         assertFalse(remedio.juntar(Alarme(3, 8, 0), agora = 10).alarme.remedio)
         assertTrue(remedio.juntar(Alarme(4, 8, 0, remedio = true), agora = 10).alarme.remedio)

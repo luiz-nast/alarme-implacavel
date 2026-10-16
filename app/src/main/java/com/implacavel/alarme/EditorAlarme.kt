@@ -88,12 +88,12 @@ fun EditorAlarme(
                 Spacer(Modifier.height(8.dp))
                 Text("Tipo", style = MaterialTheme.typography.labelLarge, modifier = Modifier.fillMaxWidth())
                 OpcaoTipo(
-                    "Câmera + frases",
+                    "Câmera + frases - ${META_OLHAR_MS / 60_000} min",
                     "A música, dizer STOP e 40 min de câmera de olhos abertos, com 5 frases pra repetir no meio",
                     tipo == TipoDeAlarme.ATIVIDADE,
                 ) { tipo = TipoDeAlarme.ATIVIDADE }
                 OpcaoTipo(
-                    "Conversa + caminhada",
+                    "Conversa + caminhada - ${(CONVERSA_MS + PRAZO_SAIR_MS + CAMINHADA_MS) / 60_000} min",
                     "A música, dizer STOP, 10 min de conversa com a IA, 4 min pra sair e 16 min andando na rua, chova ou faça sol",
                     tipo == TipoDeAlarme.CONVERSA_E_CAMINHADA,
                 ) { tipo = TipoDeAlarme.CONVERSA_E_CAMINHADA }

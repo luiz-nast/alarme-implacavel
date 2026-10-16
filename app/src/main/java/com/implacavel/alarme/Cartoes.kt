@@ -1,4 +1,4 @@
-// Blocos da tela principal: cabeçalho, permissões e testes (que abrem e fecham), cartão da música e cartão de cada alarme.
+// Blocos da tela principal: cabeçalho, permissões, testes e ajustes (que abrem e fecham), cartão da música e cartão de cada alarme.
 package com.implacavel.alarme
 
 import android.os.Build
@@ -16,13 +16,16 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -33,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.time.ZonedDateTime
+import kotlin.math.roundToInt
 
 @Composable
 fun Cabecalho(alarmes: List<Alarme>, agora: ZonedDateTime) {
@@ -139,6 +143,34 @@ fun SecaoTestes(iaPronta: Boolean, onTestar: () -> Unit, onTestarCaminhada: () -
             if (iaPronta) "IA do celular pronta (Gemma 4 E2B, sem internet)" else "IA do celular sem o modelo: o teste vai direto pra caminhada",
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(top = 4.dp),
+        )
+    }
+}
+
+/**
+ * Os ajustes, recolhidos: o volume da voz do app (o bom dia, as frases e a IA), de 10% a 100% do volume de alarme, de
+ * 5 em 5 ([volumeDaVoz]; de começo, [VOLUME_DA_VOZ]). Vale da próxima fala em diante, até no alarme tocando.
+ */
+@Composable
+fun SecaoAjustes(volumeDaVoz: Float, onVolumeDaVoz: (Float) -> Unit) {
+    var arrastando by remember(volumeDaVoz) { mutableFloatStateOf(volumeDaVoz) }
+    SecaoRecolhivel("Ajustes", "Voz do app: ${porcento(volumeDaVoz)}%", alerta = false) {
+        Text(
+            "Volume da voz: ${porcento(arrastando)}%",
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+        Slider(
+            value = arrastando,
+            onValueChange = { arrastando = it },
+            onValueChangeFinished = { onVolumeDaVoz(arrastando) },
+            valueRange = VOLUME_DA_VOZ_MIN..1f,
+            steps = ((1f - VOLUME_DA_VOZ_MIN) / 0.05f).roundToInt() - 1,
+        )
+        Text(
+            "O bom dia, as frases e a IA. A música, os bipes e os avisos não mudam.",
+            style = MaterialTheme.typography.bodySmall,
         )
     }
 }
