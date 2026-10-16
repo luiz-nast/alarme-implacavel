@@ -27,19 +27,12 @@ class App : Application() {
         Alarmes.carregar(this)
         Ajustes.carregar(this)
         Notificacoes.criarCanal(this)
-        // O processo morreu com um alarme tocando (celular desligado, app encerrado ou caído): ele volta em instantes.
-        // Um teste, não: interrompido (o dono reiniciou o celular ou o app foi parado pelo cabo), ele acaba ali, com o
-        // volume de antes; senão a única saída seria terminar o teste
+        // O processo morreu com um alarme tocando (celular desligado, app encerrado ou caído): ele volta em instantes, e
+        // a missão continua de onde estava ([Ajustes.progresso]). Vale pro teste também; pra encerrar um no meio, só
+        // pelo cabo ([PararPeloCabo])
         Ajustes.emAndamento?.let {
-            if (it.alarme.deTeste) {
-                Log.i(TAG, "Teste ${it.alarme.id} foi interrompido no meio: não volta")
-                Ajustes.emAndamento = null
-                Agendador.cancelarRetomada(this)
-                runCatching { getSystemService(AudioManager::class.java).setStreamVolume(AudioManager.STREAM_ALARM, it.volume, 0) }
-            } else {
-                Log.i(TAG, "Alarme ${it.alarme.id} foi interrompido no meio: voltando a tocar")
-                Agendador.agendarRetomada(this, 2_000)
-            }
+            Log.i(TAG, "Alarme ${it.alarme.id} foi interrompido no meio: voltando a tocar")
+            Agendador.agendarRetomada(this, 2_000)
         }
         // O processo morreu na comemoração de um alarme cumprido: devolve o volume de antes dele
         if (Ajustes.emAndamento == null) Ajustes.volumeParaDevolver?.let {

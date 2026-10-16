@@ -193,6 +193,52 @@ data class EmAndamento(val alarme: Alarme, val desde: Long, val musica: String?,
 }
 
 /**
+ * Onde a missão do alarme em andamento estava ([desde] diz de qual alarme): o anel da câmera ([olhadoMs]) e se a
+ * verificação do meio já foi feita; no "conversa + caminhada", o caminho e a etapa da manhã (pelo nome), o tempo de
+ * conversa pura e os extras, o tempo andado e quanto faltava do prazo pra sair ([prazoRestanteMs]; null = ainda não
+ * começou). O serviço grava a cada poucos segundos ([Ajustes.progresso]): se o app morrer ou o celular desligar, o
+ * alarme volta tocando e, depois do STOP, continua daqui.
+ */
+data class Progresso(
+    val desde: Long,
+    val olhadoMs: Long = 0,
+    val metadeVerificada: Boolean = false,
+    val caminho: String? = null,
+    val etapa: String? = null,
+    val conversadoMs: Long = 0,
+    val extras: Int = 0,
+    val andadoMs: Long = 0,
+    val prazoRestanteMs: Long? = null,
+) {
+    fun paraJson(): JSONObject = JSONObject()
+        .put("desde", desde)
+        .put("olhadoMs", olhadoMs)
+        .put("metadeVerificada", metadeVerificada)
+        .put("conversadoMs", conversadoMs)
+        .put("extras", extras)
+        .put("andadoMs", andadoMs)
+        .apply {
+            caminho?.let { put("caminho", it) }
+            etapa?.let { put("etapa", it) }
+            prazoRestanteMs?.let { put("prazoRestanteMs", it) }
+        }
+
+    companion object {
+        fun deJson(o: JSONObject) = Progresso(
+            desde = o.getLong("desde"),
+            olhadoMs = o.optLong("olhadoMs"),
+            metadeVerificada = o.optBoolean("metadeVerificada"),
+            caminho = o.optString("caminho").ifEmpty { null },
+            etapa = o.optString("etapa").ifEmpty { null },
+            conversadoMs = o.optLong("conversadoMs"),
+            extras = o.optInt("extras"),
+            andadoMs = o.optLong("andadoMs"),
+            prazoRestanteMs = if (o.has("prazoRestanteMs")) o.getLong("prazoRestanteMs") else null,
+        )
+    }
+}
+
+/**
  * O ganho da fala no degrau de cima, pra ela soar [fracaoDoDegrau] (de 0 a 1) do caminho entre o degrau de baixo
  * ([dbBaixo]) e o de cima ([dbCima]), em dB: os degraus do volume do Android são em dB, e o ganho do MediaPlayer é
  * linear. Com 15 degraus de uns 3 dB, 30% e 35% soam diferente.

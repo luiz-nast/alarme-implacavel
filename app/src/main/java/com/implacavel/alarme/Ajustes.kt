@@ -56,6 +56,14 @@ object Ajustes {
         get() = prefs.getLong("iaTentadaEm", 0L)
         set(valor) = prefs.edit(commit = true) { putLong("iaTentadaEm", valor) }
 
+    /**
+     * Onde a missão do alarme em andamento estava ([Progresso]), gravado pelo serviço a cada poucos segundos. Só vale
+     * pro alarme do mesmo [Progresso.desde]; gravação ilegível conta como nenhuma.
+     */
+    var progresso: Progresso?
+        get() = runCatching { prefs.getString("progresso", null)?.let { Progresso.deJson(JSONObject(it)) } }.getOrNull()
+        set(valor) = prefs.edit { if (valor == null) remove("progresso") else putString("progresso", valor.paraJson().toString()) }
+
     private val _volumeDaVoz = MutableStateFlow(VOLUME_DA_VOZ)
 
     /** Volume da voz do app, de 0,1 a 1 do volume de alarme, escolhido na tela principal (Ajustes ▾). De começo, [VOLUME_DA_VOZ]. */

@@ -170,7 +170,8 @@ class Sirene(private val ctx: Context) {
      */
     fun bipe(n: Int, som: Int = if (n >= BIPES_ATE_ZERAR) R.raw.bipe_final else R.raw.bipe) {
         val maximo = audio.getStreamMaxVolume(AudioManager.STREAM_ALARM)
-        val degrau = volumeDoBipe(n, maximo)
+        // No teste (em casa, com gente dormindo), os bipes param no volume dos avisos (40%); no alarme, vão ao máximo
+        val degrau = volumeDoBipe(n, maximo).let { if (foto?.alarme?.deTeste == true) minOf(it, volumeDosAvisos()) else it }
         if (volumeAntesDoBipe == null) volumeAntesDoBipe = audio.getStreamVolume(AudioManager.STREAM_ALARM)
         runCatching { audio.setStreamVolume(AudioManager.STREAM_ALARM, degrau, 0) }
         Log.i(TAG, "Sirene: bipe $n no volume $degrau de $maximo")

@@ -348,8 +348,49 @@ class AlarmeService : Service() {
         override fun run() {
             Agendador.agendarRetomada(this@AlarmeService)
             processador.acquire(RENOVAR_MS * 12)
+            salvarProgresso()
             handler.postDelayed(this, RENOVAR_MS)
         }
+    }
+
+    /** O último [Progresso] gravado: só grava de novo quando muda. */
+    private var progressoGravado: Progresso? = null
+
+    /** Grava onde a missão está ([Ajustes.progresso]): se o app morrer ou o celular desligar, o alarme volta daqui. */
+    private fun salvarProgresso() {
+        val em = Ajustes.emAndamento ?: return
+        val p = Progresso(
+            desde = em.desde,
+            olhadoMs = _olhado.value,
+            metadeVerificada = _metadeVerificada.value,
+            caminho = caminho?.name,
+            etapa = etapa?.name,
+            conversadoMs = conversadoMs,
+            extras = extras,
+            andadoMs = andado,
+            prazoRestanteMs = if (prazoAte == 0L) null else (prazoAte - SystemClock.elapsedRealtime()).coerceAtLeast(0),
+        )
+        if (p != progressoGravado) {
+            Ajustes.progresso = p
+            progressoGravado = p
+        }
+    }
+
+    /**
+     * O app voltou no meio deste alarme (morreu, ou o celular desligou): a missão continua de onde estava, depois do
+     * STOP de novo. A conversa com a IA não volta (o modelo pode ter sido o motivo): vai direto pra caminhada.
+     */
+    private fun retomarProgresso(p: Progresso) {
+        Log.i(TAG, "Serviço: continuando de onde parou (anel ${p.olhadoMs / 1000} s, etapa ${p.etapa}, ${p.conversadoMs / 1000} s de conversa, ${p.andadoMs / 1000} s andados)")
+        _olhado.value = p.olhadoMs
+        _metadeVerificada.value = p.metadeVerificada
+        caminho = p.caminho?.let { nome -> CaminhoDaManha.entries.firstOrNull { it.name == nome } }
+        etapa = p.etapa?.let { nome -> EtapaDaManha.entries.firstOrNull { it.name == nome } }
+        conversadoMs = p.conversadoMs
+        extras = p.extras
+        andado = p.andadoMs
+        prazoAte = p.prazoRestanteMs?.let { SystemClock.elapsedRealtime() + it } ?: 0L
+        progressoGravado = p
     }
 
     /**
@@ -384,8 +425,12 @@ class AlarmeService : Service() {
         notificacoes().notify(Notificacoes.ID_CHAMADA, criarNotificacao(alarme))
     }
 
+    /** O log do app gravado num arquivo enquanto o serviço vive ([gravarDiagnostico]). */
+    private var gravadorDoLog: Process? = null
+
     override fun onCreate() {
         super.onCreate()
+        gravarDiagnostico()
         sirene = Sirene(this)
         prepararVoz()
         processador = getSystemService(PowerManager::class.java)
@@ -419,6 +464,20 @@ class AlarmeService : Service() {
     private fun falasFixas() = FALAS_FIXAS +
         (if (Ajustes.emAndamento?.alarme?.let(::comConversaECaminhada) == true) FALAS_DA_CONVERSA else emptyMap()) +
         frasesDeHoje.mapIndexed { i, frase -> "frase_$i" to frase }
+
+    /**
+     * Enquanto um alarme toca, o log do app (só o dele, tag [TAG]) também vai pra um arquivo na pasta do app
+     * (Android/data/com.implacavel.alarme/files/diagnostico.log, girando em 4 arquivos de 1 MB). O log do Android some
+     * quando o celular reinicia; o arquivo fica, e dá pra ler depois pelo cabo:
+     *   adb pull /sdcard/Android/data/com.implacavel.alarme/files/diagnostico.log
+     * Sem as falas da conversa nem coordenadas: o log nunca teve isso.
+     */
+    private fun gravarDiagnostico() {
+        val pasta = getExternalFilesDir(null) ?: return
+        gravadorDoLog = runCatching {
+            ProcessBuilder("logcat", "-v", "time", "-s", "$TAG:V", "-T", "200", "-f", File(pasta, "diagnostico.log").path, "-r", "1024", "-n", "4").start()
+        }.onFailure { Log.w(TAG, "Serviço: não deu pra gravar o diagnóstico", it) }.getOrNull()
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -486,6 +545,8 @@ class AlarmeService : Service() {
         _tocando.value = null
         _comCaminhada.value = false
         if (processador.isHeld) processador.release()
+        // Um instante pras últimas linhas chegarem no arquivo
+        gravadorDoLog?.let { p -> Handler(Looper.getMainLooper()).postDelayed({ p.destroy() }, 1_000) }
         super.onDestroy()
     }
 
@@ -532,6 +593,9 @@ class AlarmeService : Service() {
         _metadeVerificada.value = false
         _conversa.value = null
         _caminhada.value = null
+        // Voltando no meio deste mesmo alarme: de onde parou. Alarme novo: progresso nenhum
+        val salvo = Ajustes.progresso
+        if (salvo?.desde == em.desde) retomarProgresso(salvo) else if (salvo != null) Ajustes.progresso = null
         sirene.tocar()
         handler.post(renovar)
     }
@@ -1252,6 +1316,7 @@ class AlarmeService : Service() {
         volumeAoFim = Ajustes.emAndamento?.volume
         Ajustes.volumeParaDevolver = volumeAoFim
         Ajustes.emAndamento = null
+        Ajustes.progresso = null
         Agendador.cancelarRetomada(this)
         if (!comemorar) return encerrar()
         // Missão cumprida: bipe leve, a fala de parabéns e o estouro, aí fecha

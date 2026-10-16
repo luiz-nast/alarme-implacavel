@@ -195,4 +195,16 @@ class AlarmeTest {
         assertEquals(Alarme(2, 7, 0), Alarme.deJson(antigo))
         assertFalse(Alarme.deJson(antigo).caminhada) // antes da conversa e caminhada: o despertador de sempre
     }
+
+    @Test
+    fun progressoSobreviveAoAppMorrer() {
+        val p = Progresso(
+            desde = 1_000, olhadoMs = 600_000, metadeVerificada = true, caminho = "CONVERSA_E_CAMINHADA", etapa = "CAMINHADA",
+            conversadoMs = 300_000, extras = 1, andadoMs = 95_000, prazoRestanteMs = 12_000,
+        )
+        assertEquals(p, Progresso.deJson(JSONObject(p.paraJson().toString())))
+        // Do alarme de sempre, antes de a manhã decidir: sem caminho, etapa nem prazo
+        val simples = Progresso(desde = 2_000, olhadoMs = 30_000)
+        assertEquals(simples, Progresso.deJson(JSONObject(simples.paraJson().toString())))
+    }
 }

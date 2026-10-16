@@ -74,7 +74,7 @@ private val VerdeAndando = Color(0xFF2E7D32)
 private val VermelhoParado = Color(0xFFC62828)
 
 /** O último fixo do GPS como a tela mostra: o [movimento], a [velocidade] (m/s), a [precisao] (m) e [quando] chegou (SystemClock.elapsedRealtime). */
-private data class LeituraGps(val movimento: Movimento, val velocidade: Float?, val precisao: Float?, val quando: Long)
+private data class LeituraGps(val movimento: Movimento, val velocidade: Float?, val precisao: Float?, val quando: Long, val motivo: String = "")
 
 /** Um ponto da trilha na tela: o fixo válido e se ele contou como andando (verde) ou não (cinza). */
 private data class PontoDaTrilha(val fixo: Fixo, val andando: Boolean)
@@ -142,7 +142,7 @@ fun EtapaCaminhada(
                 val avaliacao = avaliar(janela, atual)
                 val mov = avaliacao.movimento
                 resumo.somar(atual, avaliacao, chegou)
-                leitura = LeituraGps(mov, velocidade(janela, atual), atual.precisaoM, chegou)
+                leitura = LeituraGps(mov, velocidade(janela, atual), atual.precisaoM, chegou, avaliacao.motivo)
                 andadoMs += passoDeCaminhada(janela, atual)
                 janela = janelaDepois(janela, atual)
                 if (fixoValido(atual)) {
@@ -291,8 +291,15 @@ private fun retorno(leitura: LeituraGps?): Pair<Color, String> {
     val v = leitura.velocidade?.let(::textoDaVelocidade).orEmpty()
     return when (leitura.movimento) {
         Movimento.ANDANDO -> VerdeAndando to "Andando $v ✓"
-        // Nos primeiros segundos ainda não dá pra saber se saiu do lugar
-        Movimento.PARADO -> VermelhoParado to if (leitura.velocidade == null) "Conferindo se você saiu do lugar…" else "Parado: anda!"
+        // O porquê, do jeito que a regra viu (avaliar): pra pessoa saber o que fazer
+        Movimento.PARADO -> VermelhoParado to when (leitura.motivo) {
+            "sem janela" -> "Conferindo se você saiu do lugar…"
+            "pulo" -> "O GPS pulou: continua andando"
+            "vai e volta", "terço virou" -> "Indo e voltando não conta: anda pra frente"
+            "rumo" -> "Balançar o celular não conta: anda pra frente"
+            "curto sem rumo" -> "Conferindo (o GPS não diz a direção)…"
+            else -> "Parado: anda!"
+        }
         Movimento.RAPIDO_DEMAIS -> VermelhoParado to "Rápido demais: só vale a pé"
         Movimento.IMPRECISO -> VermelhoParado to "GPS fraco${leitura.precisao?.let { " (±${it.roundToInt()} m)" }.orEmpty()}: vá pra rua, longe de prédios"
         Movimento.FALSO -> VermelhoParado to "Localização falsa não vale"
